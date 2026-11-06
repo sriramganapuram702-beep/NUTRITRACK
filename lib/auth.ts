@@ -46,6 +46,53 @@ async function dispatchOtpEmail(email: string, otp: string) {
   // Always log to server dev mailbox for audit/backup
   logDevMailbox(email, otp);
 
+  // Method 1: Resend API (Recommended - fastest & no Google 2FA hassle)
+  const resendApiKey = process.env.RESEND_API_KEY;
+  if (resendApiKey) {
+    try {
+      const res = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${resendApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          from: 'NutriTrack <onboarding@resend.dev>',
+          to: [email],
+          subject: `🔐 ${otp} is your NutriTrack verification code`,
+          html: `
+            <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 520px; margin: 0 auto; padding: 32px 24px; background: #0f172a; border-radius: 20px; color: #ffffff;">
+              <div style="text-align: center; margin-bottom: 24px;">
+                <div style="display: inline-block; width: 48px; height: 48px; background: linear-gradient(135deg, #10b981, #059669); border-radius: 14px; line-height: 48px; font-size: 24px;">🥗</div>
+                <h1 style="font-size: 22px; font-weight: 800; margin: 12px 0 4px; color: #ffffff; letter-spacing: -0.5px;">NutriTrack</h1>
+                <p style="font-size: 13px; color: #94a3b8; margin: 0;">Personal Nutrition & Fitness Tracker</p>
+              </div>
+              <div style="background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 16px; padding: 28px 20px; text-align: center;">
+                <p style="font-size: 14px; color: #cbd5e1; margin-bottom: 16px;">Here is your one-time verification code to log in or create your account:</p>
+                <div style="display: inline-block; background: #10b981; color: #ffffff; font-size: 32px; font-weight: 800; letter-spacing: 8px; padding: 12px 28px; border-radius: 12px; margin-bottom: 16px; font-family: monospace;">
+                  ${otp}
+                </div>
+                <p style="font-size: 12px; color: #94a3b8; margin: 0;">⏳ Valid for <strong>10 minutes</strong>. Do not share this code with anyone.</p>
+              </div>
+              <p style="font-size: 11px; color: #64748b; text-align: center; margin-top: 24px;">If you did not request this email, no action is needed.</p>
+            </div>
+          `,
+        }),
+      });
+
+      if (res.ok) {
+        console.log(`[NutriTrack Mailer] Real email delivered via Resend to ${email}`);
+        return;
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        console.error(`[NutriTrack Mailer] Resend API error:`, errJson);
+      }
+    } catch (err) {
+      console.error(`[NutriTrack Mailer] Resend delivery failed:`, err);
+    }
+  }
+
+  // Method 2: Gmail SMTP via Nodemailer
   const smtpUser = process.env.SMTP_USER || process.env.GMAIL_USER;
   const smtpPass = process.env.SMTP_PASS || process.env.GMAIL_PASS;
 

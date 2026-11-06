@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { getCurrentUser } from '@/lib/auth';
 
 interface ChatMessage {
   role: 'user' | 'assistant';
@@ -349,6 +350,14 @@ Feel free to ask any question about your diet, meals, or fitness! 🥗💪`;
 
 export async function POST(request: Request) {
   try {
+    const auth = await getCurrentUser();
+    if (!auth) {
+      return NextResponse.json(
+        { error: 'Please log in to your NutriTrack account to use the AI Nutrition Assistant.' },
+        { status: 401 }
+      );
+    }
+
     const body = await request.json().catch(() => ({}));
     const { message = '', history = [] } = body;
 

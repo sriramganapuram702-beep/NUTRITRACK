@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 import { ThemeProvider } from '@/components/providers/ThemeProvider';
 import { Toaster } from 'sonner';
+import { NutritionChatbot } from '@/components/chat/NutritionChatbot';
 
 export const metadata: Metadata = {
   title: 'NutriTrack — Food, Nutrition & Fitness Tracker',
@@ -19,6 +20,7 @@ export default function RootLayout({
       <body className="font-sans antialiased min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           {children}
+          <NutritionChatbot />
           <Toaster position="top-right" richColors closeButton />
         </ThemeProvider>
       </body>

@@ -3,13 +3,31 @@ import path from 'path';
 import fs from 'fs';
 import { SEED_FOODS } from './seed-foods';
 
-// Ensure data directory exists
-const dataDir = path.join(process.cwd(), 'data');
+// Ensure data directory exists (on Vercel serverless use writable /tmp)
+const isVercel = process.env.VERCEL === '1' || !!process.env.AWS_LAMBDA_FUNCTION_NAME;
+const dataDir = isVercel ? '/tmp' : path.join(process.cwd(), 'data');
+
 if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
+  try {
+    fs.mkdirSync(dataDir, { recursive: true });
+  } catch (err) {
+    // Ignore if directory exists or cannot be created
+  }
 }
 
 const dbPath = path.join(dataDir, 'nutritrack.db');
+
+// If running on Vercel /tmp and DB doesn't exist yet, copy initial seed DB if present
+if (isVercel && !fs.existsSync(dbPath)) {
+  const localDb = path.join(process.cwd(), 'data', 'nutritrack.db');
+  if (fs.existsSync(localDb)) {
+    try {
+      fs.copyFileSync(localDb, dbPath);
+    } catch (err) {
+      console.warn('Could not copy initial DB to /tmp, will initialize fresh:', err);
+    }
+  }
+}
 
 // Singleton database instance
 let database: DatabaseSync | null = null;
@@ -19,7 +37,11 @@ export function getDatabase(): DatabaseSync {
 
   database = new DatabaseSync(dbPath);
   database.exec('PRAGMA foreign_keys = ON;');
-  database.exec('PRAGMA journal_mode = WAL;');
+  try {
+    database.exec('PRAGMA journal_mode = WAL;');
+  } catch (err) {
+    // WAL mode may be unsupported on some serverless /tmp filesystems
+  }
 
   initSchema(database);
   seedInitialData(database);

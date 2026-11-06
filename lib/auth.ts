@@ -11,17 +11,30 @@ const OTP_EXPIRY_MS = 10 * 60 * 1000; // 10 minutes
 const RESEND_COOLDOWN_MS = 60 * 1000; // 60 seconds
 
 // Developer mailbox log for local testing
-const devMailboxPath = path.join(process.cwd(), 'data', 'dev-mailbox.json');
+const isVercel = process.env.VERCEL === '1' || !!process.env.AWS_LAMBDA_FUNCTION_NAME;
+const dataDir = isVercel ? '/tmp' : path.join(process.cwd(), 'data');
+const devMailboxPath = path.join(dataDir, 'dev-mailbox.json');
 
 function logDevMailbox(email: string, otp: string) {
   try {
     let entries: Array<{ email: string; otp: string; time: string }> = [];
     if (fs.existsSync(devMailboxPath)) {
-      entries = JSON.parse(fs.readFileSync(devMailboxPath, 'utf8'));
+      try {
+        const raw = fs.readFileSync(devMailboxPath, 'utf8');
+        if (raw && raw.trim()) {
+          entries = JSON.parse(raw);
+        }
+      } catch {
+        entries = [];
+      }
     }
     entries.unshift({ email, otp, time: new Date().toISOString() });
     if (entries.length > 50) entries = entries.slice(0, 50);
-    fs.writeFileSync(devMailboxPath, JSON.stringify(entries, null, 2), 'utf8');
+    try {
+      fs.writeFileSync(devMailboxPath, JSON.stringify(entries, null, 2), 'utf8');
+    } catch {
+      // Ignore write errors in read-only environments
+    }
     console.log(`\n========================================\n[NutriTrack Secure Email Service]\nTo: ${email}\nOTP: ${otp}\nValid for 10 minutes.\n========================================\n`);
   } catch (err) {
     console.error('Error writing dev mailbox:', err);

@@ -12,6 +12,12 @@
 
 ## ✨ Features
 
+- **🤖 24/7 NutriTrack AI Nutrition Coach**:
+  - Dedicated conversational AI assistant available across all screens to answer nutrition questions, calculate macros for custom meals (*e.g. "I ate 2 eggs, what are my macros?"*), and provide balanced, non-judgmental guidance on street foods (*e.g. panipuri, samosas, sweets*).
+- **📱 Progressive Web App (PWA) & Mobile Installation**:
+  - Installable directly to phone home screens via Chrome/Safari without an app store, opening in fullscreen with native app icon and theme colors.
+- **🔒 180-Day Persistent Login**:
+  - Cryptographically signed HMAC-SHA256 session authentication keeping users seamlessly signed in across days, weeks, and device reboots.
 - **🔐 Real Email OTP Authentication**:
   - Live email OTP delivery powered by Nodemailer & Gmail SMTP with rate limiting, attempt throttling, and tamper-resistant SHA-256 salted hashing.
 - **🎯 Personalized Nutrition Blueprint (Mifflin-St Jeor)**:

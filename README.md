@@ -1,13 +1,19 @@
 # 🥑 NutriTrack — Food, Nutrition & Fitness Tracker
 
-NutriTrack is a modern, responsive, full-stack personal nutrition and fitness tracking application built with **Next.js 15 (App Router)**, **TypeScript**, **Tailwind CSS**, and **SQLite**.
+[![Live 24/7 App](https://img.shields.io/badge/Live%2024%2F7%20App-nutritrack--umber--tau.vercel.app-10b981?style=for-the-badge&logo=vercel&logoColor=white)](https://nutritrack-umber-tau.vercel.app)
+[![Next.js 15](https://img.shields.io/badge/Next.js-15-black?style=for-the-badge&logo=next.js)](https://nextjs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?style=for-the-badge&logo=typescript)](https://www.typescriptlang.org/)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind-3.4-38bdf8?style=for-the-badge&logo=tailwindcss)](https://tailwindcss.com/)
+
+> **🌐 Live 24/7 Website**: **[https://nutritrack-umber-tau.vercel.app](https://nutritrack-umber-tau.vercel.app)**  
+> NutriTrack is deployed 24/7 on Vercel's global network with real-time email OTP verification delivered straight to your phone and desktop Gmail!
 
 ---
 
 ## ✨ Features
 
-- **🔐 Passwordless OTP Authentication**:
-  - Secure 6-digit email OTP with rate limiting, attempt throttling, and tamper-resistant SHA-256 salted hashing.
+- **🔐 Real Email OTP Authentication**:
+  - Live email OTP delivery powered by Nodemailer & Gmail SMTP with rate limiting, attempt throttling, and tamper-resistant SHA-256 salted hashing.
 - **🎯 Personalized Nutrition Blueprint (Mifflin-St Jeor)**:
   - First-time onboarding calculating BMR, TDEE, Calories, Protein, Carbohydrates, Healthy Fats, Dietary Fibre, Water, and Steps.
 - **📊 Animated Dashboard**:
@@ -37,22 +43,21 @@ NutriTrack is a modern, responsive, full-stack personal nutrition and fitness tr
 - **Notifications**: Sonner
 - **Charts**: Recharts
 - **Database**: Native Node.js SQLite (`node:sqlite`) with WAL mode
-- **Theme**: `next-themes`
+- **Email Delivery**: Nodemailer (Gmail SMTP) + Resend integration
+- **Hosting**: Vercel Global Edge Network (24/7 Uptime)
 
 ---
 
-## 🚀 Getting Started
+## 🚀 Live Access & Quick Start
 
-### Prerequisites
+### 🌐 Access Live (No Installation Needed)
+Visit **[https://nutritrack-umber-tau.vercel.app](https://nutritrack-umber-tau.vercel.app)** from any phone, tablet, or PC.
 
-- [Node.js](https://nodejs.org/) (v20+ or v25 recommended)
-- [Git](https://git-scm.com/)
-
-### Installation
+### Local Development
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/<your-username>/nutritrack.git
+   git clone https://github.com/sriramganapuram702-beep/nutritrack.git
    cd nutritrack
    ```
 
@@ -61,32 +66,16 @@ NutriTrack is a modern, responsive, full-stack personal nutrition and fitness tr
    npm install
    ```
 
-3. **Run the production build & start**:
-   ```bash
-   npm run build
-   npm start
-   ```
-   Or run the development server:
+3. **Run development server**:
    ```bash
    npm run dev
    ```
 
-4. **Open in browser**:
-   Navigate to [http://localhost:3000](http://localhost:3000).
-
----
-
-## ☁️ Deployment
-
-### Option 1: Vercel (Recommended for Next.js)
-1. Push this repository to GitHub.
-2. Sign in to [Vercel](https://vercel.com/) with GitHub.
-3. Click **"Add New"** > **"Project"** and select your `nutritrack` repository.
-4. Deploy!
-*(Note: If deploying on serverless platforms, consider replacing local SQLite with Turso, Supabase, or PostgreSQL for persistent cloud storage).*
-
-### Option 2: Render / Railway / Self-Hosted VPS
-- Deploy as a persistent Node.js container or server to preserve local SQLite database files (`data/nutritrack.db`).
+4. **Build & Start Production**:
+   ```bash
+   npm run build
+   npm start
+   ```
 
 ---
 

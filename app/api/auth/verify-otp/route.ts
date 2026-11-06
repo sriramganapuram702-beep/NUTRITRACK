@@ -27,7 +27,7 @@ export async function POST(request: Request) {
       isNewUser: result.isNewUser,
     });
 
-    // Set HTTP-only secure cookie
+    // Set HTTP-only secure cookie for 180 days persistent login
     response.cookies.set({
       name: COOKIE_NAME,
       value: result.token,
@@ -35,7 +35,7 @@ export async function POST(request: Request) {
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       path: '/',
-      maxAge: 30 * 24 * 60 * 60, // 30 days
+      maxAge: 180 * 24 * 60 * 60, // 180 days
     });
 
     return response;

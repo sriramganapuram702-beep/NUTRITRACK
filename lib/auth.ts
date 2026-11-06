@@ -11,6 +11,34 @@ const COOKIE_NAME = 'nutritrack_session';
 const OTP_EXPIRY_MS = 10 * 60 * 1000; // 10 minutes
 const RESEND_COOLDOWN_MS = 60 * 1000; // 60 seconds
 
+function createSignedToken(payload: { userId: string; email: string; expiresAt: number }): string {
+  const data = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const signature = crypto.createHmac('sha256', AUTH_SECRET).update(data).digest('base64url');
+  return `${data}.${signature}`;
+}
+
+function verifySignedToken(token: string): { userId: string; email: string; expiresAt: number } | null {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 2) return null;
+    const [data, signature] = parts;
+    if (!data || !signature) return null;
+
+    const expectedSig = crypto.createHmac('sha256', AUTH_SECRET).update(data).digest('base64url');
+    const sigBuf = Buffer.from(signature);
+    const expBuf = Buffer.from(expectedSig);
+    if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
+      return null;
+    }
+
+    const payload = JSON.parse(Buffer.from(data, 'base64url').toString('utf8'));
+    if (Date.now() > payload.expiresAt) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
 // Developer mailbox log for local testing & fallback
 const isVercel = process.env.VERCEL === '1' || !!process.env.AWS_LAMBDA_FUNCTION_NAME;
 const dataDir = isVercel ? '/tmp' : path.join(process.cwd(), 'data');
@@ -253,15 +281,23 @@ export async function verifyOtp(email: string, otp: string): Promise<{
     isNewUser = !profile;
   }
 
-  // Create session
-  const token = crypto.randomBytes(32).toString('hex');
+  // Create persistent session (180 days)
+  const sessionExpiresAt = Date.now() + 180 * 24 * 60 * 60 * 1000;
+  const token = createSignedToken({
+    userId: user.id,
+    email: user.email,
+    expiresAt: sessionExpiresAt,
+  });
   const sessionId = 'ses_' + crypto.randomUUID();
-  const sessionExpiresAt = Date.now() + 30 * 24 * 60 * 60 * 1000; // 30 days
 
-  db.prepare(`
-    INSERT INTO sessions (id, user_id, token, expires_at, created_at)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(sessionId, user.id, token, sessionExpiresAt, now);
+  try {
+    db.prepare(`
+      INSERT INTO sessions (id, user_id, token, expires_at, created_at)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(sessionId, user.id, token, sessionExpiresAt, now);
+  } catch {
+    // Session insertion safe fallback
+  }
 
   return {
     success: true,
@@ -277,6 +313,34 @@ export async function getCurrentUser(): Promise<{ user: User; profile: Profile |
   if (!token) return null;
 
   const db = getDatabase();
+
+  // First, verify HMAC-signed persistent token (works across serverless cold starts & 180 days)
+  const payload = verifySignedToken(token);
+  if (payload) {
+    let user = db.prepare('SELECT * FROM users WHERE id = ?').get(payload.userId) as unknown as User | undefined;
+    if (!user) {
+      // Re-hydrate user in SQLite instance if serverless container restarted
+      const now = new Date().toISOString();
+      try {
+        db.prepare('INSERT OR IGNORE INTO users (id, email, created_at, updated_at) VALUES (?, ?, ?, ?)').run(
+          payload.userId,
+          payload.email,
+          now,
+          now
+        );
+        user = db.prepare('SELECT * FROM users WHERE id = ?').get(payload.userId) as unknown as User | undefined;
+      } catch (err) {
+        console.warn('Could not re-hydrate user into local instance:', err);
+      }
+    }
+
+    if (user) {
+      const profile = (db.prepare('SELECT * FROM profiles WHERE user_id = ?').get(user.id) as unknown as Profile) || null;
+      return { user, profile };
+    }
+  }
+
+  // Fallback to database session lookup for legacy hex tokens
   const session = db
     .prepare('SELECT * FROM sessions WHERE token = ? AND expires_at > ?')
     .get(token, Date.now()) as { user_id: string } | undefined;
@@ -295,8 +359,12 @@ export async function clearSession(): Promise<void> {
   const cookieStore = await cookies();
   const token = cookieStore.get(COOKIE_NAME)?.value;
   if (token) {
-    const db = getDatabase();
-    db.prepare('DELETE FROM sessions WHERE token = ?').run(token);
+    try {
+      const db = getDatabase();
+      db.prepare('DELETE FROM sessions WHERE token = ?').run(token);
+    } catch {
+      // ignore
+    }
     cookieStore.delete(COOKIE_NAME);
   }
 }

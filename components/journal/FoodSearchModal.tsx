@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, X, Check, Utensils, AlertCircle } from 'lucide-react';
+import { Search, X, Check, Utensils, AlertCircle, Plus, Sparkles } from 'lucide-react';
 import { FoodItem, MealType, PortionUnit } from '@/lib/types';
 import { calculatePortionMacros } from '@/lib/nutrition';
 import { toast } from 'sonner';
@@ -28,12 +28,26 @@ export function FoodSearchModal({
   const [foods, setFoods] = useState<FoodItem[]>([]);
   const [loading, setLoading] = useState(false);
 
+  // View state: 'search' | 'portion' | 'custom'
+  const [modalMode, setModalMode] = useState<'search' | 'portion' | 'custom'>('search');
+
   // Selected food for portion configuration
   const [selectedFood, setSelectedFood] = useState<FoodItem | null>(null);
   const [portionAmount, setPortionAmount] = useState<number>(1);
   const [portionUnit, setPortionUnit] = useState<PortionUnit>('servings');
   const [mealType, setMealType] = useState<MealType>(defaultMeal);
   const [submitting, setSubmitting] = useState(false);
+
+  // Custom food state
+  const [customName, setCustomName] = useState('');
+  const [customCategory, setCustomCategory] = useState<'Protein' | 'Carbohydrates' | 'Fruits' | 'Vegetables' | 'Discretionary'>('Carbohydrates');
+  const [customCalories, setCustomCalories] = useState<number>(200);
+  const [customProtein, setCustomProtein] = useState<number>(5);
+  const [customCarbs, setCustomCarbs] = useState<number>(30);
+  const [customFat, setCustomFat] = useState<number>(4);
+  const [customFibre, setCustomFibre] = useState<number>(2);
+  const [customPortionAmount, setCustomPortionAmount] = useState<number>(1);
+  const [customPortionUnit, setCustomPortionUnit] = useState<PortionUnit>('servings');
 
   useEffect(() => {
     if (defaultMeal) setMealType(defaultMeal);
@@ -67,15 +81,21 @@ export function FoodSearchModal({
     setSelectedFood(food);
     setPortionUnit(food.serving_unit_default || 'servings');
     setPortionAmount(food.serving_unit_default === 'grams' || food.serving_unit_default === 'ml' ? 100 : 1);
+    setModalMode('portion');
   };
 
-  // Live recalculated macros
+  const handleStartCustom = (initialName: string = '') => {
+    setCustomName(initialName || query || 'My Custom Dish');
+    setModalMode('custom');
+  };
+
+  // Live recalculated macros for preset food
   const liveMacros = useMemo(() => {
     if (!selectedFood) return null;
     return calculatePortionMacros(selectedFood, portionAmount, portionUnit);
   }, [selectedFood, portionAmount, portionUnit]);
 
-  const handleAddFood = async () => {
+  const handleAddPresetFood = async () => {
     if (!selectedFood || portionAmount <= 0) return;
 
     setSubmitting(true);
@@ -97,11 +117,54 @@ export function FoodSearchModal({
 
       toast.success(`Added ${selectedFood.name} to ${mealType}`);
       setSelectedFood(null);
+      setModalMode('search');
       setPortionAmount(1);
       onSuccess();
       onClose();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Error adding food';
+      toast.error(message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleAddCustomFood = async () => {
+    if (!customName.trim() || customCalories < 0) {
+      toast.error('Please enter a valid food name and calories.');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const res = await fetch('/api/journal/food', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          date,
+          meal_type: mealType,
+          custom_name: customName.trim(),
+          portion_amount: customPortionAmount,
+          portion_unit: customPortionUnit,
+          calories: customCalories,
+          protein: customProtein,
+          carbs: customCarbs,
+          fat: customFat,
+          fibre: customFibre,
+          is_discretionary: customCategory === 'Discretionary',
+          icon: customCategory === 'Discretionary' ? '🍔' : '🍽️',
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to add custom food');
+
+      toast.success(`Added ${customName.trim()} to ${mealType}`);
+      setModalMode('search');
+      onSuccess();
+      onClose();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Error adding custom food';
       toast.error(message);
     } finally {
       setSubmitting(false);
@@ -121,10 +184,18 @@ export function FoodSearchModal({
             </div>
             <div>
               <h2 className="text-lg font-bold text-slate-900 dark:text-white">
-                {selectedFood ? 'Configure Portion' : 'Search Food Database'}
+                {modalMode === 'custom'
+                  ? 'Add Custom Food'
+                  : modalMode === 'portion'
+                  ? 'Configure Portion'
+                  : 'Search Food Database'}
               </h2>
               <p className="text-xs text-slate-500">
-                {selectedFood ? `Adjust serving amount for ${selectedFood.name}` : `Select food to add to ${mealType}`}
+                {modalMode === 'custom'
+                  ? `Enter custom nutritional values for your dish`
+                  : modalMode === 'portion' && selectedFood
+                  ? `Adjust serving amount for ${selectedFood.name}`
+                  : `Select or type any food to add to ${mealType}`}
               </p>
             </div>
           </div>
@@ -138,28 +209,39 @@ export function FoodSearchModal({
 
         {/* Modal Content */}
         <div className="flex-1 overflow-y-auto p-6">
-          {!selectedFood ? (
+          {modalMode === 'search' ? (
             /* --- STEP 1: SEARCH & SELECT --- */
             <div className="space-y-4">
-              {/* Search Bar */}
-              <div className="relative">
-                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Type to search (e.g. Egg, Rice, Dal, Chicken, Banana)..."
-                  className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-emerald-500 text-sm"
-                  autoFocus
-                />
-                {query && (
-                  <button
-                    onClick={() => setQuery('')}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                )}
+              {/* Search Bar & Custom button */}
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="Type to search (e.g. Egg, Rice, Dal, Chicken, Dosa)..."
+                    className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-emerald-500 text-sm"
+                    autoFocus
+                  />
+                  {query && (
+                    <button
+                      onClick={() => setQuery('')}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleStartCustom(query)}
+                  className="px-3.5 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-slate-200 dark:border-slate-700 text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap transition"
+                >
+                  <Plus className="w-4 h-4" />
+                  Custom Food
+                </button>
               </div>
 
               {/* Category Pills */}
@@ -201,8 +283,18 @@ export function FoodSearchModal({
                 {loading ? (
                   <div className="py-12 text-center text-sm text-slate-400">Searching foods...</div>
                 ) : foods.length === 0 ? (
-                  <div className="py-12 text-center text-sm text-slate-400">
-                    No foods found matching your query.
+                  <div className="py-10 text-center space-y-3 bg-slate-50 dark:bg-slate-950/50 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 p-6">
+                    <p className="text-sm text-slate-600 dark:text-slate-400">
+                      No preset food found matching &quot;{query}&quot;.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => handleStartCustom(query)}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-xs transition"
+                    >
+                      <Plus className="w-4 h-4" />
+                      Add &quot;{query || 'Custom Food'}&quot; Manually
+                    </button>
                   </div>
                 ) : (
                   foods.map((food) => (
@@ -225,7 +317,7 @@ export function FoodSearchModal({
                             )}
                           </div>
                           <span className="text-xs text-slate-500">
-                            {food.calories_per_100g} kcal / 100g • {food.protein_per_100g}g protein
+                            {food.calories_per_100g} kcal / 100g • {food.protein_per_100g}g protein • {food.carbs_per_100g}g carbs
                           </span>
                         </div>
                       </div>
@@ -240,7 +332,7 @@ export function FoodSearchModal({
                 )}
               </div>
             </div>
-          ) : (
+          ) : modalMode === 'portion' && selectedFood ? (
             /* --- STEP 2: PORTION CONFIGURATION --- */
             <div className="space-y-6">
               {/* Selected Food Card */}
@@ -255,50 +347,53 @@ export function FoodSearchModal({
                   </div>
                 </div>
                 <button
-                  onClick={() => setSelectedFood(null)}
+                  onClick={() => setModalMode('search')}
                   className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 hover:underline"
                 >
                   Change Food
                 </button>
               </div>
 
-              {/* Portion Input & Unit */}
-              <div className="space-y-3">
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-                  Portion & Unit
-                </label>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <input
-                      type="number"
-                      step="any"
-                      min="0.1"
-                      value={portionAmount || ''}
-                      onChange={(e) => setPortionAmount(parseFloat(e.target.value) || 0)}
-                      className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-900 dark:text-white font-semibold text-base focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
-                      placeholder="Amount"
-                    />
-                  </div>
-
-                  <div>
-                    <select
-                      value={portionUnit}
-                      onChange={(e) => setPortionUnit(e.target.value as PortionUnit)}
-                      className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-900 dark:text-white font-medium text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
-                    >
-                      <option value="pieces">Pieces</option>
-                      <option value="cups">Cups</option>
-                      <option value="grams">Grams (g)</option>
-                      <option value="ml">Millilitres (ml)</option>
-                      <option value="servings">Servings</option>
-                    </select>
-                  </div>
+              {/* Portion Amount & Unit Selector */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">
+                    Serving Amount
+                  </label>
+                  <input
+                    type="number"
+                    min="0.1"
+                    step="0.1"
+                    value={portionAmount}
+                    onChange={(e) => setPortionAmount(Math.max(0, parseFloat(e.target.value) || 0))}
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white font-semibold text-sm focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
+                  />
                 </div>
 
-                {/* Quick Preset Buttons */}
-                <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                  {portionUnit === 'pieces' &&
-                    [1, 2, 3, 4].map((n) => (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">
+                    Unit
+                  </label>
+                  <select
+                    value={portionUnit}
+                    onChange={(e) => setPortionUnit(e.target.value as PortionUnit)}
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white font-semibold text-sm focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
+                  >
+                    <option value="servings">servings ({selectedFood.serving_weight_grams}g each)</option>
+                    <option value="grams">grams (g)</option>
+                    <option value="pieces">pieces</option>
+                    <option value="cups">cups (~200g)</option>
+                    <option value="ml">ml (millilitres)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Quick Amount Pills */}
+              <div>
+                <label className="block text-xs font-medium text-slate-500 mb-2">Quick Presets:</label>
+                <div className="flex gap-2 flex-wrap">
+                  {portionUnit === 'servings' &&
+                    [0.5, 1, 1.5, 2, 3].map((n) => (
                       <button
                         key={n}
                         onClick={() => setPortionAmount(n)}
@@ -308,7 +403,22 @@ export function FoodSearchModal({
                             : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
                         }`}
                       >
-                        {n} {n === 1 ? 'piece' : 'pieces'}
+                        {n} serving{n > 1 ? 's' : ''}
+                      </button>
+                    ))}
+
+                  {portionUnit === 'pieces' &&
+                    [1, 2, 3, 4, 5].map((n) => (
+                      <button
+                        key={n}
+                        onClick={() => setPortionAmount(n)}
+                        className={`px-3 py-1 rounded-lg text-xs font-medium transition ${
+                          portionAmount === n
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+                        }`}
+                      >
+                        {n} pc{n > 1 ? 's' : ''}
                       </button>
                     ))}
 
@@ -323,12 +433,12 @@ export function FoodSearchModal({
                             : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
                         }`}
                       >
-                        {n} {n === 1 ? 'cup' : 'cups'}
+                        {n} cup{n > 1 ? 's' : ''}
                       </button>
                     ))}
 
                   {portionUnit === 'grams' &&
-                    [50, 100, 150, 200, 250].map((n) => (
+                    [50, 100, 150, 200, 250, 300].map((n) => (
                       <button
                         key={n}
                         onClick={() => setPortionAmount(n)}
@@ -417,16 +527,186 @@ export function FoodSearchModal({
                 </div>
               )}
             </div>
+          ) : (
+            /* --- STEP 3: CUSTOM FOOD ENTRY --- */
+            <div className="space-y-4">
+              <div className="p-3 rounded-2xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 text-xs text-emerald-800 dark:text-emerald-300 flex items-center gap-2">
+                <Sparkles className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                <span>Enter custom food details. NutriTrack will log it accurately into your daily macros!</span>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
+                  Dish / Food Name
+                </label>
+                <input
+                  type="text"
+                  value={customName}
+                  onChange={(e) => setCustomName(e.target.value)}
+                  placeholder="e.g. Chicken Biryani, Protein Shake, Dosa..."
+                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white font-medium text-sm focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
+                    Category
+                  </label>
+                  <select
+                    value={customCategory}
+                    onChange={(e) => setCustomCategory(e.target.value as any)}
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white text-sm focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
+                  >
+                    <option value="Protein">Protein</option>
+                    <option value="Carbohydrates">Carbohydrates</option>
+                    <option value="Fruits">Fruits</option>
+                    <option value="Vegetables">Vegetables</option>
+                    <option value="Discretionary">Discretionary (Snacks/Treats)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
+                    Portion
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="number"
+                      min="0.5"
+                      step="0.5"
+                      value={customPortionAmount}
+                      onChange={(e) => setCustomPortionAmount(Math.max(0.1, parseFloat(e.target.value) || 1))}
+                      className="w-20 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white text-sm font-semibold"
+                    />
+                    <select
+                      value={customPortionUnit}
+                      onChange={(e) => setCustomPortionUnit(e.target.value as PortionUnit)}
+                      className="flex-1 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white text-sm"
+                    >
+                      <option value="servings">serving</option>
+                      <option value="grams">grams</option>
+                      <option value="pieces">pieces</option>
+                      <option value="cups">cups</option>
+                      <option value="ml">ml</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Calories & Macros Inputs */}
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                    Total Calories (kcal)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={customCalories}
+                    onChange={(e) => {
+                      const cal = Math.max(0, parseInt(e.target.value) || 0);
+                      setCustomCalories(cal);
+                      // Auto estimate macros based on calories if desired
+                      if (cal > 0) {
+                        if (customCategory === 'Protein') {
+                          setCustomProtein(Math.round((cal * 0.4) / 4));
+                          setCustomCarbs(Math.round((cal * 0.3) / 4));
+                          setCustomFat(Math.round((cal * 0.3) / 9));
+                        } else {
+                          setCustomProtein(Math.round((cal * 0.15) / 4));
+                          setCustomCarbs(Math.round((cal * 0.55) / 4));
+                          setCustomFat(Math.round((cal * 0.3) / 9));
+                        }
+                      }
+                    }}
+                    className="w-28 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-right font-bold text-emerald-600 dark:text-emerald-400 text-sm"
+                  />
+                </div>
+
+                <div className="grid grid-cols-4 gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+                  <div>
+                    <label className="block text-[11px] text-slate-500 mb-1">Protein (g)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.5"
+                      value={customProtein}
+                      onChange={(e) => setCustomProtein(Math.max(0, parseFloat(e.target.value) || 0))}
+                      className="w-full px-2.5 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-center"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-slate-500 mb-1">Carbs (g)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.5"
+                      value={customCarbs}
+                      onChange={(e) => setCustomCarbs(Math.max(0, parseFloat(e.target.value) || 0))}
+                      className="w-full px-2.5 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-center"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-slate-500 mb-1">Fat (g)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.5"
+                      value={customFat}
+                      onChange={(e) => setCustomFat(Math.max(0, parseFloat(e.target.value) || 0))}
+                      className="w-full px-2.5 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-center"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-slate-500 mb-1">Fibre (g)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.5"
+                      value={customFibre}
+                      onChange={(e) => setCustomFibre(Math.max(0, parseFloat(e.target.value) || 0))}
+                      className="w-full px-2.5 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-center"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Meal Slot */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">
+                  Meal Slot
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {(['Breakfast', 'Morning Snack', 'Lunch', 'Evening Snack', 'Dinner', 'Other'] as MealType[]).map(
+                    (slot) => (
+                      <button
+                        key={slot}
+                        type="button"
+                        onClick={() => setMealType(slot)}
+                        className={`py-2 px-3 rounded-xl text-xs font-semibold transition text-center ${
+                          mealType === slot
+                            ? 'bg-emerald-600 text-white shadow-xs'
+                            : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
+                        }`}
+                      >
+                        {slot}
+                      </button>
+                    )
+                  )}
+                </div>
+              </div>
+            </div>
           )}
         </div>
 
         {/* Footer actions */}
         <div className="px-6 py-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-950">
-          {selectedFood ? (
+          {modalMode === 'portion' ? (
             <>
               <button
                 type="button"
-                onClick={() => setSelectedFood(null)}
+                onClick={() => setModalMode('search')}
                 className="px-4 py-2 rounded-xl text-sm font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800 transition"
               >
                 Back to Search
@@ -434,15 +714,42 @@ export function FoodSearchModal({
 
               <button
                 type="button"
-                onClick={handleAddFood}
+                onClick={handleAddPresetFood}
                 disabled={submitting || portionAmount <= 0}
                 className="px-5 py-2.5 rounded-xl text-sm font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-600/20 disabled:opacity-50 transition flex items-center gap-2"
               >
                 {submitting ? 'Adding...' : 'Add to Food Journal'}
               </button>
             </>
+          ) : modalMode === 'custom' ? (
+            <>
+              <button
+                type="button"
+                onClick={() => setModalMode('search')}
+                className="px-4 py-2 rounded-xl text-sm font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800 transition"
+              >
+                Back to Search
+              </button>
+
+              <button
+                type="button"
+                onClick={handleAddCustomFood}
+                disabled={submitting || !customName.trim()}
+                className="px-5 py-2.5 rounded-xl text-sm font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-600/20 disabled:opacity-50 transition flex items-center gap-2"
+              >
+                {submitting ? 'Adding...' : 'Add Custom Food'}
+              </button>
+            </>
           ) : (
-            <div className="w-full flex justify-end">
+            <div className="w-full flex justify-between items-center">
+              <button
+                type="button"
+                onClick={() => handleStartCustom('')}
+                className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-1"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Add custom food
+              </button>
               <button
                 type="button"
                 onClick={onClose}

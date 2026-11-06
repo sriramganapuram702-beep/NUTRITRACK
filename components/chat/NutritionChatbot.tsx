@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
+import { usePathname } from 'next/navigation';
 import {
   MessageSquare,
   X,
@@ -30,9 +31,26 @@ const QUICK_SUGGESTIONS = [
 ];
 
 export function NutritionChatbot() {
+  const pathname = usePathname();
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // Check authentication status & only show for logged-in users on app pages
+  useEffect(() => {
+    if (pathname === '/' || pathname === '/onboarding') {
+      setIsAuthenticated(false);
+      return;
+    }
+
+    fetch('/api/auth/me')
+      .then((res) => res.json())
+      .then((data) => {
+        setIsAuthenticated(Boolean(data.authenticated));
+      })
+      .catch(() => setIsAuthenticated(false));
+  }, [pathname]);
   const [messages, setMessages] = useState<Message[]>([
     {
       id: 'welcome',
@@ -162,6 +180,11 @@ export function NutritionChatbot() {
       .replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold text-slate-900 dark:text-white">$1</strong>')
       .replace(/\*(.*?)\*/g, '<em class="italic">$1</em>');
   };
+
+  // Only show the floating AI Chatbot after the user is logged in
+  if (pathname === '/' || pathname === '/onboarding' || !isAuthenticated) {
+    return null;
+  }
 
   return (
     <>

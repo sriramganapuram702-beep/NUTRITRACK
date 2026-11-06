@@ -1,7 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  serverExternalPackages: ['node:sqlite'],
+  serverExternalPackages: ['node:sqlite', 'nodemailer'],
   typescript: {
     ignoreBuildErrors: false,
   },

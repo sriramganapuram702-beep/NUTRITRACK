@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { cookies } from 'next/headers';
+import nodemailer from 'nodemailer';
 import { getDatabase } from './db';
 import { Profile, User } from './types';
 
@@ -10,7 +11,7 @@ const COOKIE_NAME = 'nutritrack_session';
 const OTP_EXPIRY_MS = 10 * 60 * 1000; // 10 minutes
 const RESEND_COOLDOWN_MS = 60 * 1000; // 60 seconds
 
-// Developer mailbox log for local testing
+// Developer mailbox log for local testing & fallback
 const isVercel = process.env.VERCEL === '1' || !!process.env.AWS_LAMBDA_FUNCTION_NAME;
 const dataDir = isVercel ? '/tmp' : path.join(process.cwd(), 'data');
 const devMailboxPath = path.join(dataDir, 'dev-mailbox.json');
@@ -38,6 +39,58 @@ function logDevMailbox(email: string, otp: string) {
     console.log(`\n========================================\n[NutriTrack Secure Email Service]\nTo: ${email}\nOTP: ${otp}\nValid for 10 minutes.\n========================================\n`);
   } catch (err) {
     console.error('Error writing dev mailbox:', err);
+  }
+}
+
+async function dispatchOtpEmail(email: string, otp: string) {
+  // Always log to server dev mailbox for audit/backup
+  logDevMailbox(email, otp);
+
+  const smtpUser = process.env.SMTP_USER || process.env.GMAIL_USER;
+  const smtpPass = process.env.SMTP_PASS || process.env.GMAIL_PASS;
+
+  if (!smtpUser || !smtpPass) {
+    console.log(`[NutriTrack Mailer] No SMTP credentials configured. OTP logged to server logs.`);
+    return;
+  }
+
+  try {
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: smtpUser,
+        pass: smtpPass,
+      },
+    });
+
+    const mailOptions = {
+      from: `"NutriTrack" <${smtpUser}>`,
+      to: email,
+      subject: `🔐 ${otp} is your NutriTrack verification code`,
+      text: `Your NutriTrack verification code is: ${otp}\n\nThis code will expire in 10 minutes.\nIf you did not request this code, you can safely ignore this email.`,
+      html: `
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 520px; margin: 0 auto; padding: 32px 24px; background: #0f172a; border-radius: 20px; color: #ffffff;">
+          <div style="text-align: center; margin-bottom: 24px;">
+            <div style="display: inline-block; width: 48px; height: 48px; background: linear-gradient(135deg, #10b981, #059669); border-radius: 14px; line-height: 48px; font-size: 24px;">🥗</div>
+            <h1 style="font-size: 22px; font-weight: 800; margin: 12px 0 4px; color: #ffffff; letter-spacing: -0.5px;">NutriTrack</h1>
+            <p style="font-size: 13px; color: #94a3b8; margin: 0;">Personal Nutrition & Fitness Tracker</p>
+          </div>
+          <div style="background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 16px; padding: 28px 20px; text-align: center;">
+            <p style="font-size: 14px; color: #cbd5e1; margin-bottom: 16px;">Here is your one-time verification code to log in or create your account:</p>
+            <div style="display: inline-block; background: #10b981; color: #ffffff; font-size: 32px; font-weight: 800; letter-spacing: 8px; padding: 12px 28px; border-radius: 12px; margin-bottom: 16px; font-family: monospace;">
+              ${otp}
+            </div>
+            <p style="font-size: 12px; color: #94a3b8; margin: 0;">⏳ Valid for <strong>10 minutes</strong>. Do not share this code with anyone.</p>
+          </div>
+          <p style="font-size: 11px; color: #64748b; text-align: center; margin-top: 24px;">If you did not request this email, no action is needed.</p>
+        </div>
+      `,
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+    console.log(`[NutriTrack Mailer] Real email delivered to ${email} (MessageId: ${info.messageId})`);
+  } catch (error) {
+    console.error(`[NutriTrack Mailer] Failed to deliver real email via SMTP:`, error);
   }
 }
 
@@ -85,8 +138,8 @@ export async function sendOtp(email: string): Promise<{ success: boolean; messag
     VALUES (?, ?, ?, ?, 0, ?)
   `).run(id, normalizedEmail, otpHash, expiresAt, now);
 
-  // Dispatch OTP
-  logDevMailbox(normalizedEmail, otp);
+  // Dispatch OTP (real email via SMTP + server log fallback)
+  await dispatchOtpEmail(normalizedEmail, otp);
 
   return {
     success: true,

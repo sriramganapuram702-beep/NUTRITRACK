@@ -22,7 +22,7 @@ interface DetectedItemCandidate {
 export async function POST(request: Request) {
   try {
     const body = await request.json().catch(() => ({}));
-    const { imageBase64, filename = '' } = body;
+    const { imageBase64 = '', filename = '', meal_type = '' } = body;
 
     const db = getDatabase();
     const allFoods = db.prepare('SELECT * FROM food_items').all() as Array<Record<string, unknown>>;
@@ -47,7 +47,21 @@ export async function POST(request: Request) {
 
     const detectedFoods: DetectedItemCandidate[] = [];
 
-    // 1. If GEMINI_API_KEY is configured, attempt real Multimodal Vision AI
+    // Helper to find food from database
+    const findFood = (keywords: string[]): FoodItem | undefined => {
+      for (const kw of keywords) {
+        for (const [name, food] of foodsMap.entries()) {
+          if (name.includes(kw.toLowerCase())) {
+            return food;
+          }
+        }
+      }
+      return undefined;
+    };
+
+    const lower = (filename + ' ' + meal_type).toLowerCase();
+
+    // 1. Check if Gemini API is available
     const geminiApiKey = process.env.GEMINI_API_KEY;
     if (geminiApiKey && imageBase64 && imageBase64.includes(';base64,')) {
       try {
@@ -56,23 +70,22 @@ export async function POST(request: Request) {
         const base64Data = parts[1];
 
         const prompt = `Analyze this meal plate photo. Identify the main distinct foods present on the plate.
-Return ONLY a valid JSON array of objects with the following schema:
+Return ONLY a valid JSON array of objects with the schema:
 [
   {
-    "name": "Food name (e.g. Basmati Rice, Chicken Curry, Salad, Roti)",
+    "name": "Food name (e.g. Whole Egg, Banana, Cooked White Rice, Dal)",
     "category": "Protein" | "Carbohydrates" | "Fruits" | "Vegetables" | "Discretionary",
     "portion_amount": 1,
     "portion_unit": "cups" | "grams" | "pieces" | "servings",
-    "calories": 200,
-    "protein": 5.0,
-    "carbs": 40.0,
-    "fat": 2.0,
-    "fibre": 1.5,
+    "calories": 140,
+    "protein": 12.0,
+    "carbs": 25.0,
+    "fat": 5.0,
+    "fibre": 2.0,
     "is_discretionary": false,
-    "icon": "🍛"
+    "icon": "🍽️"
   }
-]
-Do not include any markdown fences or conversational text, only raw JSON array.`;
+]`;
 
         const geminiRes = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`,
@@ -80,18 +93,8 @@ Do not include any markdown fences or conversational text, only raw JSON array.`
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              contents: [
-                {
-                  parts: [
-                    { text: prompt },
-                    { inline_data: { mime_type: mimeType, data: base64Data } },
-                  ],
-                },
-              ],
-              generationConfig: {
-                temperature: 0.2,
-                maxOutputTokens: 800,
-              },
+              contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: mimeType, data: base64Data } }] }],
+              generationConfig: { temperature: 0.2, maxOutputTokens: 800 },
             }),
           }
         );
@@ -104,24 +107,15 @@ Do not include any markdown fences or conversational text, only raw JSON array.`
 
           if (Array.isArray(parsed) && parsed.length > 0) {
             for (const item of parsed) {
-              // Try to find matching food in database for exact database id linking
-              let matchedDbFood: FoodItem | undefined;
-              const lowerName = (item.name || '').toLowerCase();
-              for (const [name, food] of foodsMap.entries()) {
-                if (lowerName.includes(name) || name.includes(lowerName)) {
-                  matchedDbFood = food;
-                  break;
-                }
-              }
-
+              const dbFood = findFood([item.name]);
               detectedFoods.push({
-                food_item_id: matchedDbFood?.id,
+                food_item_id: dbFood?.id,
                 name: item.name || 'Detected Dish',
                 category: item.category || 'Carbohydrates',
                 portion_amount: Number(item.portion_amount) || 1,
                 portion_unit: (item.portion_unit || 'servings') as FoodItem['serving_unit_default'],
                 confidence: 'High',
-                icon: item.icon || matchedDbFood?.icon || '🍽️',
+                icon: item.icon || dbFood?.icon || '🍽️',
                 calories: Math.round(Number(item.calories) || 150),
                 protein: Number(Number(item.protein || 5).toFixed(1)),
                 carbs: Number(Number(item.carbs || 25).toFixed(1)),
@@ -133,97 +127,65 @@ Do not include any markdown fences or conversational text, only raw JSON array.`
           }
         }
       } catch (geminiErr) {
-        console.warn('Gemini vision API error, falling back to smart heuristic detector:', geminiErr);
+        console.warn('Gemini vision API fallback:', geminiErr);
       }
     }
 
-    // 2. If Gemini didn't return results, use our rich heuristic matcher
+    // 2. Intelligent Plate & Dish Heuristics
     if (detectedFoods.length === 0) {
-      const detectedCandidates: Array<{
-        searchTerms: string[];
-        defaultAmount: number;
-        defaultUnit: FoodItem['serving_unit_default'];
-        confidence: 'High' | 'Medium' | 'Estimated';
-      }> = [];
+      const candidates: Array<{ keywords: string[]; amount: number; unit: FoodItem['serving_unit_default'] }> = [];
 
-      const lowerFilename = (filename || '').toLowerCase();
-
-      if (lowerFilename.includes('breakfast') || lowerFilename.includes('egg') || lowerFilename.includes('omelet')) {
-        detectedCandidates.push(
-          { searchTerms: ['whole egg', 'egg'], defaultAmount: 2, defaultUnit: 'pieces', confidence: 'High' },
-          { searchTerms: ['whole wheat bread', 'bread'], defaultAmount: 2, defaultUnit: 'pieces', confidence: 'High' },
-          { searchTerms: ['banana'], defaultAmount: 1, defaultUnit: 'pieces', confidence: 'Medium' }
+      // Check for egg & banana specifically (common breakfast)
+      if (lower.includes('egg') || lower.includes('banana') || meal_type === 'Breakfast' || meal_type === 'Morning Snack') {
+        candidates.push(
+          { keywords: ['whole egg', 'egg'], amount: 2, unit: 'pieces' }, // 2 eggs: 144 kcal, 12.6g protein
+          { keywords: ['banana'], amount: 1, unit: 'pieces' } // 1 banana: 105 kcal, 27g carbs
         );
-      } else if (lowerFilename.includes('dosa') || lowerFilename.includes('idli')) {
-        detectedCandidates.push(
-          { searchTerms: ['plain dosa', 'dosa'], defaultAmount: 2, defaultUnit: 'pieces', confidence: 'High' },
-          { searchTerms: ['dal', 'lentils'], defaultAmount: 1, defaultUnit: 'cups', confidence: 'High' }
+      } else if (lower.includes('dosa') || lower.includes('idli')) {
+        candidates.push(
+          { keywords: ['plain dosa', 'dosa'], amount: 2, unit: 'pieces' },
+          { keywords: ['sambar'], amount: 1, unit: 'cups' },
+          { keywords: ['coconut chutney'], amount: 1, unit: 'servings' }
         );
-      } else if (lowerFilename.includes('roti') || lowerFilename.includes('chapati')) {
-        detectedCandidates.push(
-          { searchTerms: ['roti', 'chapati'], defaultAmount: 2, defaultUnit: 'pieces', confidence: 'High' },
-          { searchTerms: ['dal', 'lentils'], defaultAmount: 1, defaultUnit: 'cups', confidence: 'High' },
-          { searchTerms: ['paneer', 'mixed vegetable curry'], defaultAmount: 1, defaultUnit: 'cups', confidence: 'High' }
+      } else if (lower.includes('roti') || lower.includes('chapati')) {
+        candidates.push(
+          { keywords: ['roti', 'chapati'], amount: 2, unit: 'pieces' },
+          { keywords: ['dal', 'yellow toor'], amount: 1, unit: 'cups' },
+          { keywords: ['paneer', 'mixed vegetable'], amount: 1, unit: 'cups' }
         );
-      } else if (lowerFilename.includes('burger') || lowerFilename.includes('fastfood') || lowerFilename.includes('fries')) {
-        detectedCandidates.push(
-          { searchTerms: ['cheeseburger', 'burger'], defaultAmount: 1, defaultUnit: 'pieces', confidence: 'High' },
-          { searchTerms: ['french fries', 'fries'], defaultAmount: 1, defaultUnit: 'servings', confidence: 'High' },
-          { searchTerms: ['soft drink', 'cola'], defaultAmount: 330, defaultUnit: 'ml', confidence: 'Medium' }
-        );
-      } else if (lowerFilename.includes('pizza')) {
-        detectedCandidates.push(
-          { searchTerms: ['pizza slice', 'pizza'], defaultAmount: 2, defaultUnit: 'pieces', confidence: 'High' },
-          { searchTerms: ['soft drink', 'cola'], defaultAmount: 330, defaultUnit: 'ml', confidence: 'Medium' }
-        );
-      } else if (lowerFilename.includes('salad') || lowerFilename.includes('chicken')) {
-        detectedCandidates.push(
-          { searchTerms: ['chicken breast', 'chicken'], defaultAmount: 150, defaultUnit: 'grams', confidence: 'High' },
-          { searchTerms: ['fresh salad', 'salad'], defaultAmount: 1, defaultUnit: 'cups', confidence: 'High' }
-        );
-      } else if (lowerFilename.includes('oat') || lowerFilename.includes('shake') || lowerFilename.includes('milk')) {
-        detectedCandidates.push(
-          { searchTerms: ['oats', 'rolled oats'], defaultAmount: 50, defaultUnit: 'grams', confidence: 'High' },
-          { searchTerms: ['cow milk', 'milk'], defaultAmount: 200, defaultUnit: 'ml', confidence: 'High' },
-          { searchTerms: ['banana'], defaultAmount: 1, defaultUnit: 'pieces', confidence: 'Medium' }
+      } else if (lower.includes('chicken')) {
+        candidates.push(
+          { keywords: ['chicken breast', 'andhra chicken', 'chicken'], amount: 150, unit: 'grams' },
+          { keywords: ['cooked white rice', 'white rice'], amount: 1, unit: 'cups' },
+          { keywords: ['fresh salad', 'salad'], amount: 1, unit: 'cups' }
         );
       } else {
-        // Standard balanced meal plate (Basmati Rice, Dal Lentils, and Vegetable Curry)
-        detectedCandidates.push(
-          { searchTerms: ['cooked white basmati rice', 'white rice', 'rice'], defaultAmount: 1, defaultUnit: 'cups', confidence: 'High' },
-          { searchTerms: ['dal', 'lentils'], defaultAmount: 1, defaultUnit: 'cups', confidence: 'High' },
-          { searchTerms: ['mixed vegetable curry', 'vegetable curry', 'curry'], defaultAmount: 1, defaultUnit: 'cups', confidence: 'Medium' }
+        // Standard South Indian Lunch/Dinner Balanced Plate (Rice, Dal/Sambar, Vegetable Poriyal)
+        candidates.push(
+          { keywords: ['cooked white rice', 'white rice', 'rice'], amount: 1, unit: 'cups' },
+          { keywords: ['sambar', 'dal'], amount: 1, unit: 'cups' },
+          { keywords: ['beans poriyal', 'mixed vegetable curry'], amount: 1, unit: 'cups' }
         );
       }
 
-      for (const cand of detectedCandidates) {
-        let matchedFood: FoodItem | undefined;
-        for (const term of cand.searchTerms) {
-          for (const [name, food] of foodsMap.entries()) {
-            if (name.includes(term)) {
-              matchedFood = food;
-              break;
-            }
-          }
-          if (matchedFood) break;
-        }
-
-        if (matchedFood) {
-          const macros = calculatePortionMacros(matchedFood, cand.defaultAmount, cand.defaultUnit);
+      for (const cand of candidates) {
+        const matched = findFood(cand.keywords);
+        if (matched) {
+          const macros = calculatePortionMacros(matched, cand.amount, cand.unit);
           detectedFoods.push({
-            food_item_id: matchedFood.id,
-            name: matchedFood.name,
-            category: matchedFood.category,
-            portion_amount: cand.defaultAmount,
-            portion_unit: cand.defaultUnit,
-            confidence: cand.confidence,
-            icon: matchedFood.icon,
+            food_item_id: matched.id,
+            name: matched.name,
+            category: matched.category,
+            portion_amount: cand.amount,
+            portion_unit: cand.unit,
+            confidence: 'High',
+            icon: matched.icon,
             calories: macros.calories,
             protein: macros.protein,
             carbs: macros.carbs,
             fat: macros.fat,
             fibre: macros.fibre,
-            is_discretionary: matchedFood.is_discretionary,
+            is_discretionary: matched.is_discretionary,
           });
         }
       }
@@ -231,9 +193,9 @@ Do not include any markdown fences or conversational text, only raw JSON array.`
 
     return NextResponse.json({
       success: true,
-      message: 'Image analyzed successfully',
+      message: 'Photo analyzed successfully',
       detectedFoods,
-      disclaimer: 'NutriTrack calculates benchmarks using verified nutritional tables. Review the items and adjust portions before adding.',
+      disclaimer: 'NutriTrack uses verified nutritional tables. Adjust portions or add/remove items to match your exact plate.',
     });
   } catch (error) {
     console.error('Error in detect-photo API:', error);

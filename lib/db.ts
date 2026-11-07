@@ -190,11 +190,6 @@ function initSchema(db: DatabaseSync) {
 }
 
 function seedInitialData(db: DatabaseSync) {
-  const countRow = db.prepare('SELECT COUNT(*) as count FROM food_items').get() as { count: number };
-  if (countRow && countRow.count > 0) {
-    return; // Already seeded
-  }
-
   const insertStmt = db.prepare(`
     INSERT INTO food_items (
       id, name, category, calories_per_100g, protein_per_100g, carbs_per_100g,
@@ -205,23 +200,28 @@ function seedInitialData(db: DatabaseSync) {
     )
   `);
 
+  const checkStmt = db.prepare('SELECT id FROM food_items WHERE name = ? LIMIT 1');
   const now = new Date().toISOString();
+
   for (const food of SEED_FOODS) {
-    const id = 'food_' + Math.random().toString(36).substring(2, 11);
-    insertStmt.run(
-      id,
-      food.name,
-      food.category,
-      food.calories_per_100g,
-      food.protein_per_100g,
-      food.carbs_per_100g,
-      food.fat_per_100g,
-      food.fibre_per_100g,
-      food.serving_unit_default,
-      food.serving_weight_grams,
-      food.is_discretionary ? 1 : 0,
-      food.icon,
-      now
-    );
+    const existing = checkStmt.get(food.name);
+    if (!existing) {
+      const id = 'food_' + Math.random().toString(36).substring(2, 11);
+      insertStmt.run(
+        id,
+        food.name,
+        food.category,
+        food.calories_per_100g,
+        food.protein_per_100g,
+        food.carbs_per_100g,
+        food.fat_per_100g,
+        food.fibre_per_100g,
+        food.serving_unit_default,
+        food.serving_weight_grams,
+        food.is_discretionary ? 1 : 0,
+        food.icon,
+        now
+      );
+    }
   }
 }

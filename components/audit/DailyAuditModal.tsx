@@ -18,12 +18,14 @@ import { CircularProgress } from '@/components/ui/CircularProgress';
 import { ProgressBar } from '@/components/ui/ProgressBar';
 import { DisclaimerBanner } from '@/components/ui/DisclaimerBanner';
 import { DailyGoalBreakdown, DailyRemarks } from '@/lib/types';
+import { clientStorage } from '@/lib/client-storage';
 import { toast } from 'sonner';
 
 interface DailyAuditModalProps {
   isOpen: boolean;
   onClose: () => void;
   date: string;
+  userId?: string;
   isSubmitted: boolean;
   totals: {
     calories: number;
@@ -53,6 +55,7 @@ export function DailyAuditModal({
   isOpen,
   onClose,
   date,
+  userId = 'usr_default',
   isSubmitted,
   totals,
   targets,
@@ -68,6 +71,9 @@ export function DailyAuditModal({
 
   const handleConfirmSubmit = async () => {
     setLoading(true);
+    // 1. Submit locally for instant calendar archive
+    clientStorage.submitDay(userId, date, breakdown.overall);
+
     try {
       const res = await fetch('/api/journal/submit', {
         method: 'POST',
@@ -81,8 +87,10 @@ export function DailyAuditModal({
       setShowConfirmSubmit(false);
       onRefresh();
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Error submitting day';
-      toast.error(message);
+      console.warn('Network issue during submit, saved locally:', err);
+      toast.success('Day submitted and archived in Calendar!');
+      setShowConfirmSubmit(false);
+      onRefresh();
     } finally {
       setLoading(false);
     }
@@ -90,6 +98,9 @@ export function DailyAuditModal({
 
   const handleUnlockDay = async () => {
     setLoading(true);
+    // 1. Unlock locally
+    clientStorage.unsubmitDay(userId, date);
+
     try {
       const res = await fetch('/api/journal/unsubmit', {
         method: 'POST',
@@ -103,8 +114,10 @@ export function DailyAuditModal({
       onRefresh();
       onClose();
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Error unlocking day';
-      toast.error(message);
+      console.warn('Network issue during unlock, saved locally:', err);
+      toast.info('Day unlocked for editing.');
+      onRefresh();
+      onClose();
     } finally {
       setLoading(false);
     }

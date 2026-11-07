@@ -6,6 +6,7 @@ import {
   UtensilsCrossed,
   Plus,
   Camera,
+  Barcode,
   Trash2,
   Calendar,
   ChevronLeft,
@@ -21,9 +22,11 @@ import { MobileNav } from '@/components/navigation/MobileNav';
 import { TopBar } from '@/components/navigation/TopBar';
 import { FoodSearchModal } from '@/components/journal/FoodSearchModal';
 import { PhotoFoodModal } from '@/components/journal/PhotoFoodModal';
+import { BarcodeScannerModal } from '@/components/journal/BarcodeScannerModal';
 import { DailyAuditModal } from '@/components/audit/DailyAuditModal';
 import { DisclaimerBanner } from '@/components/ui/DisclaimerBanner';
 import { DailyGoalBreakdown, DailyRemarks, FoodEntry, MealType, User } from '@/lib/types';
+import { clientStorage } from '@/lib/client-storage';
 import { toast } from 'sonner';
 
 const MEAL_SECTIONS: { type: MealType; icon: string; label: string; timeHint: string }[] = [
@@ -88,6 +91,7 @@ function JournalContent() {
   const [activeMealForAdd, setActiveMealForAdd] = useState<MealType>('Breakfast');
   const [searchModalOpen, setSearchModalOpen] = useState(false);
   const [photoModalOpen, setPhotoModalOpen] = useState(false);
+  const [barcodeModalOpen, setBarcodeModalOpen] = useState(false);
   const [auditModalOpen, setAuditModalOpen] = useState(false);
 
   // View mode: 'by-meal' or 'timeline'
@@ -103,15 +107,84 @@ function JournalContent() {
       }
       setUser(authData.user);
 
+      // 1. INSTANT PERSISTENCE: Load from phone storage first (0ms, survives serverless recycles)
+      const localDay = clientStorage.getDayData(authData.user.id, date);
+      if (localDay && localDay.foodEntries && localDay.foodEntries.length > 0) {
+        setFoodEntries(localDay.foodEntries);
+        const cals = Math.round(localDay.foodEntries.reduce((s, f) => s + f.calories, 0));
+        const prot = Number(localDay.foodEntries.reduce((s, f) => s + f.protein, 0).toFixed(1));
+        const carbs = Number(localDay.foodEntries.reduce((s, f) => s + f.carbs, 0).toFixed(1));
+        const fat = Number(localDay.foodEntries.reduce((s, f) => s + f.fat, 0).toFixed(1));
+        const fibre = Number(localDay.foodEntries.reduce((s, f) => s + f.fibre, 0).toFixed(1));
+        setTotals((prev) => ({
+          ...prev,
+          calories: cals,
+          protein: prot,
+          carbs,
+          fat,
+          fibre,
+          foodCount: localDay.foodEntries.length,
+          water: localDay.waterEntries?.reduce((s, w) => s + w.amount_ml, 0) || prev.water,
+          steps: localDay.steps || prev.steps,
+        }));
+        setIsSubmitted(Boolean(localDay.isSubmitted));
+      }
+
+      // 2. Fetch server journal data
       const res = await fetch(`/api/journal?date=${date}`);
       const data = await res.json();
       if (data) {
-        setFoodEntries(data.foodEntries || []);
-        setTotals(data.totals || totals);
+        // Merge server and local storage safely (guaranteeing local foods are NEVER wiped)
+        const merged = clientStorage.mergeServerData(
+          authData.user.id,
+          date,
+          data.foodEntries || [],
+          data.waterEntries || [],
+          data.totals?.steps || 0
+        );
+
+        setFoodEntries(merged.foodEntries);
         setTargets(data.targets || targets);
         setBreakdown(data.breakdown || breakdown);
         setRemarks(data.remarks || remarks);
-        setIsSubmitted(Boolean(data.log?.is_submitted));
+        setIsSubmitted(Boolean(data.log?.is_submitted || merged.isSubmitted));
+
+        const finalCals = Math.round(merged.foodEntries.reduce((s, f) => s + f.calories, 0));
+        const finalProt = Number(merged.foodEntries.reduce((s, f) => s + f.protein, 0).toFixed(1));
+        const finalCarbs = Number(merged.foodEntries.reduce((s, f) => s + f.carbs, 0).toFixed(1));
+        const finalFat = Number(merged.foodEntries.reduce((s, f) => s + f.fat, 0).toFixed(1));
+        const finalFibre = Number(merged.foodEntries.reduce((s, f) => s + f.fibre, 0).toFixed(1));
+        const finalWater = merged.waterEntries.reduce((s, w) => s + w.amount_ml, 0);
+
+        setTotals({
+          calories: finalCals,
+          protein: finalProt,
+          carbs: finalCarbs,
+          fat: finalFat,
+          fibre: finalFibre,
+          water: finalWater,
+          steps: merged.steps,
+          foodCount: merged.foodEntries.length,
+          discretionaryCount: merged.foodEntries.filter((f) => f.is_discretionary).length,
+        });
+
+        // If local had foods/water that the server was missing (e.g. serverless restart), re-hydrate the server
+        if (
+          merged.foodEntries.length > (data.foodEntries?.length || 0) ||
+          merged.waterEntries.length > (data.waterEntries?.length || 0)
+        ) {
+          fetch('/api/journal/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              date,
+              foodEntries: merged.foodEntries,
+              waterEntries: merged.waterEntries,
+              steps: merged.steps,
+              isSubmitted: merged.isSubmitted,
+            }),
+          }).catch((err) => console.warn('Background sync warning:', err));
+        }
       }
     } catch (err) {
       console.error('Failed to load journal:', err);
@@ -143,14 +216,18 @@ function JournalContent() {
       return;
     }
 
+    if (user) {
+      // 1. Delete from client storage immediately
+      clientStorage.deleteFoodEntry(user.id, date, id);
+      setFoodEntries((prev) => prev.filter((f) => f.id !== id));
+      toast.success('Food entry removed.');
+    }
+
     try {
-      const res = await fetch(`/api/journal/food/${id}`, { method: 'DELETE' });
-      if (res.ok) {
-        toast.success('Food entry removed.');
-        fetchJournal();
-      }
+      await fetch(`/api/journal/food/${id}`, { method: 'DELETE' });
+      fetchJournal();
     } catch {
-      toast.error('Failed to delete entry');
+      // Already deleted locally
     }
   };
 
@@ -170,6 +247,15 @@ function JournalContent() {
     }
     setActiveMealForAdd(meal);
     setPhotoModalOpen(true);
+  };
+
+  const openBarcodeModal = (meal: MealType) => {
+    if (isSubmitted) {
+      toast.info('This day has been submitted. Unlock via "Edit Day" in Audit to make changes.');
+      return;
+    }
+    setActiveMealForAdd(meal);
+    setBarcodeModalOpen(true);
   };
 
   if (loading) {
@@ -382,6 +468,16 @@ function JournalContent() {
                           </button>
 
                           <button
+                            onClick={() => openBarcodeModal(section.type)}
+                            disabled={isSubmitted}
+                            className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold text-indigo-600 dark:text-indigo-400 transition flex items-center gap-1.5 disabled:opacity-50"
+                            title="Scan packaged food barcode"
+                          >
+                            <Barcode className="w-3.5 h-3.5" />
+                            <span className="hidden sm:inline">Barcode</span>
+                          </button>
+
+                          <button
                             onClick={() => openAddModal(section.type)}
                             disabled={isSubmitted}
                             className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-xs transition flex items-center gap-1.5 disabled:opacity-50"
@@ -540,6 +636,7 @@ function JournalContent() {
         onClose={() => setSearchModalOpen(false)}
         defaultMeal={activeMealForAdd}
         date={date}
+        userId={user?.id}
         onSuccess={fetchJournal}
       />
 
@@ -548,6 +645,16 @@ function JournalContent() {
         onClose={() => setPhotoModalOpen(false)}
         defaultMeal={activeMealForAdd}
         date={date}
+        userId={user?.id}
+        onSuccess={fetchJournal}
+      />
+
+      <BarcodeScannerModal
+        isOpen={barcodeModalOpen}
+        onClose={() => setBarcodeModalOpen(false)}
+        defaultMeal={activeMealForAdd}
+        date={date}
+        userId={user?.id}
         onSuccess={fetchJournal}
       />
 
@@ -555,6 +662,7 @@ function JournalContent() {
         isOpen={auditModalOpen}
         onClose={() => setAuditModalOpen(false)}
         date={date}
+        userId={user?.id}
         isSubmitted={isSubmitted}
         totals={totals}
         targets={targets}

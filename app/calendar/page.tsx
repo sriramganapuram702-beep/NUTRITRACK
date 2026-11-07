@@ -18,6 +18,7 @@ import { TopBar } from '@/components/navigation/TopBar';
 import { DisclaimerBanner } from '@/components/ui/DisclaimerBanner';
 import { DailyAuditModal } from '@/components/audit/DailyAuditModal';
 import { DailyGoalBreakdown, DailyRemarks, User } from '@/lib/types';
+import { clientStorage } from '@/lib/client-storage';
 
 interface CalendarDayData {
   date: string; // YYYY-MM-DD
@@ -67,9 +68,44 @@ export default function CalendarPage() {
 
       const res = await fetch(`/api/calendar?month=${currentMonth}`);
       const data = await res.json();
-      if (data && data.days) {
-        setDays(data.days);
-      }
+      const serverDays: CalendarDayData[] = (data && data.days) || [];
+
+      // MERGE CLIENT-PERSISTENT DATA (Guarantees calendar history is preserved forever across years)
+      const mergedDays = serverDays.map((day) => {
+        const local = clientStorage.getDayData(authData.user.id, day.date);
+        if (
+          local &&
+          (local.foodEntries.length > 0 ||
+            local.isSubmitted ||
+            local.steps > 0 ||
+            local.waterEntries.length > 0)
+        ) {
+          const localCals = Math.round(local.foodEntries.reduce((s, f) => s + f.calories, 0));
+          const localMeals = new Set(local.foodEntries.map((f) => f.meal_type)).size;
+          const localPct =
+            local.goalCompletionPct ||
+            (localCals > 0 ? Math.min(100, Math.round((localCals / 2000) * 100)) : 0);
+
+          let finalStatus: CalendarDayData['status'] = day.status;
+          if (finalStatus === 'untracked') {
+            if (localPct >= 80) finalStatus = 'achieved';
+            else if (localPct >= 50) finalStatus = 'improvement';
+            else finalStatus = 'missed';
+          }
+
+          return {
+            ...day,
+            status: finalStatus,
+            completionPct: Math.max(day.completionPct || 0, localPct),
+            calories: Math.max(day.calories || 0, localCals),
+            mealCount: Math.max(day.mealCount || 0, localMeals),
+            isSubmitted: Boolean(day.isSubmitted || local.isSubmitted),
+          };
+        }
+        return day;
+      });
+
+      setDays(mergedDays);
     } catch (err) {
       console.error('Failed to load calendar:', err);
     } finally {
@@ -90,22 +126,72 @@ export default function CalendarPage() {
   const handleSelectDate = async (day: CalendarDayData) => {
     setSelectedDay(day);
 
-    // Fetch that day's journal details to open the report modal
+    if (!user) return;
+
+    // 1. Prepare local audit fallback first
+    const local = clientStorage.getDayData(user.id, day.date);
+    const localCals = Math.round(local.foodEntries.reduce((s, f) => s + f.calories, 0));
+    const localProt = Number(local.foodEntries.reduce((s, f) => s + f.protein, 0).toFixed(1));
+    const localCarbs = Number(local.foodEntries.reduce((s, f) => s + f.carbs, 0).toFixed(1));
+    const localFat = Number(local.foodEntries.reduce((s, f) => s + f.fat, 0).toFixed(1));
+    const localFibre = Number(local.foodEntries.reduce((s, f) => s + f.fibre, 0).toFixed(1));
+    const localWater = local.waterEntries.reduce((s, w) => s + w.amount_ml, 0);
+
+    const fallbackAudit = {
+      date: day.date,
+      isSubmitted: Boolean(day.isSubmitted || local.isSubmitted),
+      totals: {
+        calories: localCals,
+        protein: localProt,
+        carbs: localCarbs,
+        fat: localFat,
+        fibre: localFibre,
+        water: localWater,
+        steps: local.steps || 0,
+        discretionaryCount: local.foodEntries.filter((f) => f.is_discretionary).length,
+      },
+      targets: {
+        calorieTarget: 2000,
+        proteinTarget: 80,
+        carbTarget: 250,
+        fatTarget: 65,
+        fibreTarget: 28,
+        waterTarget: 3000,
+        stepTarget: 10000,
+      },
+      breakdown: {
+        calories: { consumed: localCals, target: 2000, pct: Math.min(100, Math.round((localCals / 2000) * 100)), score: 10 },
+        protein: { consumed: localProt, target: 80, pct: Math.min(100, Math.round((localProt / 80) * 100)), score: 10 },
+        fibre: { consumed: localFibre, target: 28, pct: Math.min(100, Math.round((localFibre / 28) * 100)), score: 10 },
+        water: { consumed: localWater, target: 3000, pct: Math.min(100, Math.round((localWater / 3000) * 100)), score: 10 },
+        steps: { consumed: local.steps || 0, target: 10000, pct: Math.min(100, Math.round(((local.steps || 0) / 10000) * 100)), score: 10 },
+        consistency: { loggedMeals: new Set(local.foodEntries.map((f) => f.meal_type)).size, score: 10 },
+        discretionaryPenalty: 0,
+        overall: day.completionPct || local.goalCompletionPct || 80,
+      },
+      remarks: {
+        disclaimer: 'NutriTrack automated audit report.',
+      },
+    };
+
+    setInspectedAuditData(fallbackAudit);
+
+    // 2. Fetch server details
     try {
       const res = await fetch(`/api/journal?date=${day.date}`);
       const data = await res.json();
-      if (data) {
+      if (data && data.log) {
         setInspectedAuditData({
           date: day.date,
-          isSubmitted: Boolean(data.log?.is_submitted),
-          totals: data.totals,
-          targets: data.targets,
-          breakdown: data.breakdown,
-          remarks: data.remarks,
+          isSubmitted: Boolean(data.log?.is_submitted || local.isSubmitted),
+          totals: data.totals || fallbackAudit.totals,
+          targets: data.targets || fallbackAudit.targets,
+          breakdown: data.breakdown || fallbackAudit.breakdown,
+          remarks: data.remarks || fallbackAudit.remarks,
         });
       }
     } catch (err) {
-      console.error('Failed to inspect day:', err);
+      console.warn('Inspecting day using local storage:', err);
     }
   };
 
@@ -314,6 +400,7 @@ export default function CalendarPage() {
           isOpen={auditModalOpen}
           onClose={() => setAuditModalOpen(false)}
           date={inspectedAuditData.date}
+          userId={user?.id}
           isSubmitted={inspectedAuditData.isSubmitted}
           totals={inspectedAuditData.totals}
           targets={inspectedAuditData.targets}

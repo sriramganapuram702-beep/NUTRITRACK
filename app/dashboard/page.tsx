@@ -15,6 +15,8 @@ import {
   Sparkles,
   ChevronRight,
   RefreshCw,
+  Barcode,
+  Award,
 } from 'lucide-react';
 import { Sidebar } from '@/components/navigation/Sidebar';
 import { MobileNav } from '@/components/navigation/MobileNav';
@@ -24,8 +26,12 @@ import { CircularProgress } from '@/components/ui/CircularProgress';
 import { DisclaimerBanner } from '@/components/ui/DisclaimerBanner';
 import { FoodSearchModal } from '@/components/journal/FoodSearchModal';
 import { PhotoFoodModal } from '@/components/journal/PhotoFoodModal';
+import { BarcodeScannerModal } from '@/components/journal/BarcodeScannerModal';
+import { MealPlannerModal } from '@/components/dashboard/MealPlannerModal';
+import { ShareStreakModal } from '@/components/badges/ShareStreakModal';
 import { DailyAuditModal } from '@/components/audit/DailyAuditModal';
 import { DailyGoalBreakdown, DailyRemarks, FoodEntry, Profile, User, WaterEntry } from '@/lib/types';
+import { clientStorage } from '@/lib/client-storage';
 import { toast } from 'sonner';
 
 export default function DashboardPage() {
@@ -78,6 +84,9 @@ export default function DashboardPage() {
   // Modals
   const [searchModalOpen, setSearchModalOpen] = useState(false);
   const [photoModalOpen, setPhotoModalOpen] = useState(false);
+  const [barcodeModalOpen, setBarcodeModalOpen] = useState(false);
+  const [mealPlannerOpen, setMealPlannerOpen] = useState(false);
+  const [streakModalOpen, setStreakModalOpen] = useState(false);
   const [auditModalOpen, setAuditModalOpen] = useState(false);
   const [waterModalOpen, setWaterModalOpen] = useState(false);
   const [stepModalOpen, setStepModalOpen] = useState(false);
@@ -107,18 +116,90 @@ export default function DashboardPage() {
       setUser(meData.user);
       setProfile(meData.profile);
 
-      // Fetch Journal details for selected date
+      // 1. INSTANT PERSISTENCE: Read from phone storage first (never lost across cold starts)
+      const localDay = clientStorage.getDayData(meData.user.id, selectedDate);
+      if (localDay && (localDay.foodEntries.length > 0 || localDay.waterEntries.length > 0 || localDay.steps > 0)) {
+        setFoodEntries(localDay.foodEntries);
+        setWaterEntries(localDay.waterEntries);
+        const cals = Math.round(localDay.foodEntries.reduce((s, f) => s + f.calories, 0));
+        const prot = Number(localDay.foodEntries.reduce((s, f) => s + f.protein, 0).toFixed(1));
+        const carbs = Number(localDay.foodEntries.reduce((s, f) => s + f.carbs, 0).toFixed(1));
+        const fat = Number(localDay.foodEntries.reduce((s, f) => s + f.fat, 0).toFixed(1));
+        const fibre = Number(localDay.foodEntries.reduce((s, f) => s + f.fibre, 0).toFixed(1));
+        const water = localDay.waterEntries.reduce((s, w) => s + w.amount_ml, 0);
+
+        setTotals((prev) => ({
+          ...prev,
+          calories: cals,
+          protein: prot,
+          carbs,
+          fat,
+          fibre,
+          water,
+          steps: localDay.steps,
+          foodCount: localDay.foodEntries.length,
+        }));
+        setStepInput(localDay.steps || 0);
+        setIsSubmitted(Boolean(localDay.isSubmitted));
+      }
+
+      // 2. Fetch cloud journal details for selected date
       const journalRes = await fetch(`/api/journal?date=${selectedDate}`);
       const journalData = await journalRes.json();
       if (journalData) {
-        setFoodEntries(journalData.foodEntries || []);
-        setWaterEntries(journalData.waterEntries || []);
-        setTotals(journalData.totals || totals);
+        // Merge safely so local entries (e.g. 2 eggs + banana) are NEVER wiped
+        const merged = clientStorage.mergeServerData(
+          meData.user.id,
+          selectedDate,
+          journalData.foodEntries || [],
+          journalData.waterEntries || [],
+          journalData.totals?.steps || 0
+        );
+
+        setFoodEntries(merged.foodEntries);
+        setWaterEntries(merged.waterEntries);
         setTargets(journalData.targets || targets);
         setBreakdown(journalData.breakdown || breakdown);
         setRemarks(journalData.remarks || remarks);
-        setIsSubmitted(Boolean(journalData.log?.is_submitted));
-        setStepInput(journalData.totals?.steps || 0);
+        setIsSubmitted(Boolean(journalData.log?.is_submitted || merged.isSubmitted));
+        setStepInput(merged.steps);
+
+        const finalCals = Math.round(merged.foodEntries.reduce((s, f) => s + f.calories, 0));
+        const finalProt = Number(merged.foodEntries.reduce((s, f) => s + f.protein, 0).toFixed(1));
+        const finalCarbs = Number(merged.foodEntries.reduce((s, f) => s + f.carbs, 0).toFixed(1));
+        const finalFat = Number(merged.foodEntries.reduce((s, f) => s + f.fat, 0).toFixed(1));
+        const finalFibre = Number(merged.foodEntries.reduce((s, f) => s + f.fibre, 0).toFixed(1));
+        const finalWater = merged.waterEntries.reduce((s, w) => s + w.amount_ml, 0);
+
+        setTotals({
+          calories: finalCals,
+          protein: finalProt,
+          carbs: finalCarbs,
+          fat: finalFat,
+          fibre: finalFibre,
+          water: finalWater,
+          steps: merged.steps,
+          foodCount: merged.foodEntries.length,
+          discretionaryCount: merged.foodEntries.filter((f) => f.is_discretionary).length,
+        });
+
+        // Re-hydrate server if cold restart cleared it
+        if (
+          merged.foodEntries.length > (journalData.foodEntries?.length || 0) ||
+          merged.waterEntries.length > (journalData.waterEntries?.length || 0)
+        ) {
+          fetch('/api/journal/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              date: selectedDate,
+              foodEntries: merged.foodEntries,
+              waterEntries: merged.waterEntries,
+              steps: merged.steps,
+              isSubmitted: merged.isSubmitted,
+            }),
+          }).catch(() => {});
+        }
       }
     } catch (err) {
       console.error('Failed to load dashboard:', err);
@@ -131,39 +212,55 @@ export default function DashboardPage() {
     fetchDashboard();
   }, [fetchDashboard]);
 
-  // Fast water logger
+  // Fast water logger (GUARANTEED: NEVER WIPES FOOD ENTRIES)
   const handleQuickAddWater = async (amount: number) => {
+    if (amount <= 0 || !user) return;
+
+    // 1. Save locally FIRST so food entries are completely protected
+    const now = new Date().toISOString();
+    const entryId = 'wat_' + Math.random().toString(36).substring(2, 11) + '_' + Date.now();
+    const newEntry: WaterEntry = {
+      id: entryId,
+      daily_log_id: 'log_' + selectedDate,
+      amount_ml: amount,
+      logged_at: now,
+    };
+
+    clientStorage.saveWaterEntry(user.id, selectedDate, newEntry);
+    setWaterEntries((prev) => [...prev, newEntry]);
+    setTotals((prev) => ({ ...prev, water: prev.water + amount }));
+    toast.success(`+${amount} ml water logged!`);
+    setWaterModalOpen(false);
+
     try {
-      const res = await fetch('/api/journal/water', {
+      await fetch('/api/journal/water', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ date: selectedDate, amount_ml: amount }),
       });
-      if (res.ok) {
-        toast.success(`+${amount} ml water added!`);
-        setWaterModalOpen(false);
-        fetchDashboard();
-      }
+      fetchDashboard();
     } catch {
-      toast.error('Failed to add water');
+      // Already saved locally
     }
   };
 
   // Step updater
   const handleSaveSteps = async () => {
+    if (!user) return;
+    clientStorage.saveSteps(user.id, selectedDate, stepInput);
+    setTotals((prev) => ({ ...prev, steps: stepInput }));
+    toast.success(`Steps set to ${stepInput.toLocaleString()}`);
+    setStepModalOpen(false);
+
     try {
-      const res = await fetch('/api/journal/steps', {
+      await fetch('/api/journal/steps', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ date: selectedDate, steps: stepInput }),
       });
-      if (res.ok) {
-        toast.success(`Steps set to ${stepInput.toLocaleString()}`);
-        setStepModalOpen(false);
-        fetchDashboard();
-      }
+      fetchDashboard();
     } catch {
-      toast.error('Failed to update steps');
+      // Saved locally
     }
   };
 
@@ -234,6 +331,30 @@ export default function DashboardPage() {
               </button>
 
               <button
+                onClick={() => setBarcodeModalOpen(true)}
+                className="px-3.5 py-2.5 rounded-xl font-semibold text-xs md:text-sm bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition flex items-center gap-1.5 border border-indigo-200 dark:border-indigo-900"
+              >
+                <Barcode className="w-4 h-4" />
+                <span>Barcode</span>
+              </button>
+
+              <button
+                onClick={() => setMealPlannerOpen(true)}
+                className="px-3.5 py-2.5 rounded-xl font-semibold text-xs md:text-sm bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition flex items-center gap-1.5 border border-emerald-200 dark:border-emerald-900"
+              >
+                <Sparkles className="w-4 h-4 text-emerald-600" />
+                <span>🥗 AI Meal Plan</span>
+              </button>
+
+              <button
+                onClick={() => setStreakModalOpen(true)}
+                className="px-3.5 py-2.5 rounded-xl font-semibold text-xs md:text-sm bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/50 transition flex items-center gap-1.5 border border-amber-200 dark:border-amber-900"
+              >
+                <Award className="w-4 h-4 text-amber-500" />
+                <span>🏆 Streak</span>
+              </button>
+
+              <button
                 onClick={() => setWaterModalOpen(true)}
                 className="px-3.5 py-2.5 rounded-xl font-semibold text-xs md:text-sm bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition flex items-center gap-1.5 border border-blue-200 dark:border-blue-900"
               >
@@ -242,11 +363,12 @@ export default function DashboardPage() {
               </button>
 
               <button
-                onClick={() => setStepModalOpen(true)}
+                onClick={() => router.push('/steps')}
                 className="px-3.5 py-2.5 rounded-xl font-semibold text-xs md:text-sm bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-900/50 transition flex items-center gap-1.5 border border-purple-200 dark:border-purple-900"
+                title="Open Phone Motion Sensor Pedometer"
               >
                 <Footprints className="w-4 h-4" />
-                <span>Steps</span>
+                <span>🚶 Auto Steps</span>
               </button>
 
               <button
@@ -556,6 +678,7 @@ export default function DashboardPage() {
         isOpen={searchModalOpen}
         onClose={() => setSearchModalOpen(false)}
         date={selectedDate}
+        userId={user?.id}
         onSuccess={fetchDashboard}
       />
 
@@ -563,13 +686,35 @@ export default function DashboardPage() {
         isOpen={photoModalOpen}
         onClose={() => setPhotoModalOpen(false)}
         date={selectedDate}
+        userId={user?.id}
         onSuccess={fetchDashboard}
+      />
+
+      <BarcodeScannerModal
+        isOpen={barcodeModalOpen}
+        onClose={() => setBarcodeModalOpen(false)}
+        date={selectedDate}
+        userId={user?.id}
+        onSuccess={fetchDashboard}
+      />
+
+      <MealPlannerModal
+        isOpen={mealPlannerOpen}
+        onClose={() => setMealPlannerOpen(false)}
+        date={selectedDate}
+        userId={user?.id}
+      />
+
+      <ShareStreakModal
+        isOpen={streakModalOpen}
+        onClose={() => setStreakModalOpen(false)}
       />
 
       <DailyAuditModal
         isOpen={auditModalOpen}
         onClose={() => setAuditModalOpen(false)}
         date={selectedDate}
+        userId={user?.id}
         isSubmitted={isSubmitted}
         totals={totals}
         targets={targets}

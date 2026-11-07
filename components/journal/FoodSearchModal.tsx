@@ -2,8 +2,9 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Search, X, Check, Utensils, AlertCircle, Plus, Sparkles } from 'lucide-react';
-import { FoodItem, MealType, PortionUnit } from '@/lib/types';
+import { FoodEntry, FoodItem, MealType, PortionUnit } from '@/lib/types';
 import { calculatePortionMacros } from '@/lib/nutrition';
+import { clientStorage } from '@/lib/client-storage';
 import { toast } from 'sonner';
 
 interface FoodSearchModalProps {
@@ -11,6 +12,7 @@ interface FoodSearchModalProps {
   onClose: () => void;
   defaultMeal?: MealType;
   date: string;
+  userId?: string;
   onSuccess: () => void;
 }
 
@@ -21,6 +23,7 @@ export function FoodSearchModal({
   onClose,
   defaultMeal = 'Breakfast',
   date,
+  userId = 'usr_default',
   onSuccess,
 }: FoodSearchModalProps) {
   const [query, setQuery] = useState('');
@@ -99,6 +102,32 @@ export function FoodSearchModal({
     if (!selectedFood || portionAmount <= 0) return;
 
     setSubmitting(true);
+    const now = new Date().toISOString();
+    const tempId = 'fent_' + Math.random().toString(36).substring(2, 11) + '_' + Date.now();
+    const macros = liveMacros || calculatePortionMacros(selectedFood, portionAmount, portionUnit);
+
+    const localEntry: FoodEntry = {
+      id: tempId,
+      daily_log_id: 'log_' + date,
+      meal_type: mealType,
+      food_item_id: selectedFood.id,
+      custom_name: selectedFood.name,
+      portion_amount: portionAmount,
+      portion_unit: portionUnit,
+      computed_weight_g: macros.computedWeightG,
+      calories: macros.calories,
+      protein: macros.protein,
+      carbs: macros.carbs,
+      fat: macros.fat,
+      fibre: macros.fibre,
+      is_discretionary: selectedFood.is_discretionary,
+      icon: selectedFood.icon || '🍽️',
+      created_at: now,
+    };
+
+    // 1. GUARANTEED PERSISTENCE: Save to client storage immediately!
+    clientStorage.saveFoodEntry(userId, date, localEntry);
+
     try {
       const res = await fetch('/api/journal/food', {
         method: 'POST',
@@ -113,7 +142,11 @@ export function FoodSearchModal({
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to add food');
+      if (res.ok && data.entry) {
+        // Update client storage with server ID if available
+        clientStorage.deleteFoodEntry(userId, date, tempId);
+        clientStorage.saveFoodEntry(userId, date, data.entry);
+      }
 
       toast.success(`Added ${selectedFood.name} to ${mealType}`);
       setSelectedFood(null);
@@ -122,8 +155,12 @@ export function FoodSearchModal({
       onSuccess();
       onClose();
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Error adding food';
-      toast.error(message);
+      console.warn('Network sync issue, but food saved locally:', err);
+      toast.success(`Added ${selectedFood.name} to ${mealType} (Saved offline)`);
+      setSelectedFood(null);
+      setModalMode('search');
+      onSuccess();
+      onClose();
     } finally {
       setSubmitting(false);
     }
@@ -136,6 +173,31 @@ export function FoodSearchModal({
     }
 
     setSubmitting(true);
+    const now = new Date().toISOString();
+    const tempId = 'fent_' + Math.random().toString(36).substring(2, 11) + '_' + Date.now();
+
+    const localEntry: FoodEntry = {
+      id: tempId,
+      daily_log_id: 'log_' + date,
+      meal_type: mealType,
+      food_item_id: null,
+      custom_name: customName.trim(),
+      portion_amount: customPortionAmount,
+      portion_unit: customPortionUnit,
+      computed_weight_g: customPortionUnit === 'grams' ? customPortionAmount : 100,
+      calories: customCalories,
+      protein: customProtein,
+      carbs: customCarbs,
+      fat: customFat,
+      fibre: customFibre,
+      is_discretionary: customCategory === 'Discretionary',
+      icon: customCategory === 'Discretionary' ? '🍔' : '🍽️',
+      created_at: now,
+    };
+
+    // 1. GUARANTEED PERSISTENCE: Save to client storage immediately!
+    clientStorage.saveFoodEntry(userId, date, localEntry);
+
     try {
       const res = await fetch('/api/journal/food', {
         method: 'POST',
@@ -157,15 +219,21 @@ export function FoodSearchModal({
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to add custom food');
+      if (res.ok && data.entry) {
+        clientStorage.deleteFoodEntry(userId, date, tempId);
+        clientStorage.saveFoodEntry(userId, date, data.entry);
+      }
 
       toast.success(`Added ${customName.trim()} to ${mealType}`);
       setModalMode('search');
       onSuccess();
       onClose();
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Error adding custom food';
-      toast.error(message);
+      console.warn('Network sync issue, but food saved locally:', err);
+      toast.success(`Added ${customName.trim()} to ${mealType} (Saved offline)`);
+      setModalMode('search');
+      onSuccess();
+      onClose();
     } finally {
       setSubmitting(false);
     }

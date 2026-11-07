@@ -68,7 +68,7 @@ export interface FoodEntry {
   id: string;
   daily_log_id: string;
   meal_type: MealType;
-  food_item_id?: string;
+  food_item_id?: string | null;
   custom_name: string;
   portion_amount: number;
   portion_unit: PortionUnit;

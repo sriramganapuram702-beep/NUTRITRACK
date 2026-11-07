@@ -13,6 +13,7 @@ import {
   TrendingUp,
   Clock,
   Sparkles,
+  ChevronLeft,
   ChevronRight,
   RefreshCw,
   Barcode,
@@ -32,6 +33,7 @@ import { ShareStreakModal } from '@/components/badges/ShareStreakModal';
 import { DailyAuditModal } from '@/components/audit/DailyAuditModal';
 import { DailyGoalBreakdown, DailyRemarks, FoodEntry, Profile, User, WaterEntry } from '@/lib/types';
 import { clientStorage } from '@/lib/client-storage';
+import { usePhonePedometer } from '@/hooks/usePhonePedometer';
 import { toast } from 'sonner';
 
 export default function DashboardPage() {
@@ -40,8 +42,8 @@ export default function DashboardPage() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Selected date (defaults to today)
-  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split('T')[0]);
+  // Selected date (defaults to user's local today date)
+  const [selectedDate, setSelectedDate] = useState(() => clientStorage.getLocalTodayString());
 
   // Dashboard Data
   const [foodEntries, setFoodEntries] = useState<FoodEntry[]>([]);
@@ -93,6 +95,21 @@ export default function DashboardPage() {
   const [stepInput, setStepInput] = useState<number>(0);
   const [waterCustomInput, setWaterCustomInput] = useState<number>(250);
 
+  // Automatic Phone Motion Pedometer
+  const {
+    isTracking: pedometerTracking,
+    startTracking: startPedometer,
+    stopTracking: stopPedometer,
+  } = usePhonePedometer({
+    userId: user?.id,
+    date: selectedDate,
+    initialSteps: totals.steps,
+    onStepUpdate: (newSteps) => {
+      setTotals((prev) => ({ ...prev, steps: newSteps }));
+      setStepInput(newSteps);
+    },
+  });
+
   // Greeting
   const getGreeting = () => {
     const hour = new Date().getHours();
@@ -114,6 +131,7 @@ export default function DashboardPage() {
         return;
       }
       setUser(meData.user);
+      clientStorage.setActiveUser(meData.user.id);
       
       // Load user profile from persistent storage (handles cold restart / profile update)
       const localProfile = clientStorage.getProfile(meData.user.id) || clientStorage.getProfile();
@@ -332,10 +350,51 @@ export default function DashboardPage() {
           {/* Header Greeting Banner */}
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white dark:bg-slate-900 p-6 md:p-8 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-xs">
             <div>
-              <div className="flex items-center gap-2 mb-1">
-                <span className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">
-                  {formattedDate}
-                </span>
+              <div className="flex items-center gap-2 mb-2 flex-wrap">
+                <div className="inline-flex items-center gap-1 bg-slate-100 dark:bg-slate-800 rounded-xl p-1 border border-slate-200 dark:border-slate-700">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const d = new Date(selectedDate + 'T00:00:00');
+                      d.setDate(d.getDate() - 1);
+                      setSelectedDate(clientStorage.formatLocalDate(d));
+                    }}
+                    className="p-1 hover:bg-white dark:hover:bg-slate-700 rounded-lg text-slate-600 dark:text-slate-300 transition"
+                    title="Previous day"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <span className="text-xs font-bold px-2 text-slate-800 dark:text-slate-200">
+                    {formattedDate}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const d = new Date(selectedDate + 'T00:00:00');
+                      d.setDate(d.getDate() + 1);
+                      setSelectedDate(clientStorage.formatLocalDate(d));
+                    }}
+                    className="p-1 hover:bg-white dark:hover:bg-slate-700 rounded-lg text-slate-600 dark:text-slate-300 transition"
+                    title="Next day"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {selectedDate !== clientStorage.getLocalTodayString() ? (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDate(clientStorage.getLocalTodayString())}
+                    className="text-xs font-bold px-2.5 py-1 rounded-xl bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-200 transition"
+                  >
+                    Jump to Today
+                  </button>
+                ) : (
+                  <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                    Active Today
+                  </span>
+                )}
+
                 {isSubmitted && (
                   <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300">
                     Day Submitted & Audited
@@ -400,12 +459,16 @@ export default function DashboardPage() {
               </button>
 
               <button
-                onClick={() => router.push('/steps')}
-                className="px-3.5 py-2.5 rounded-xl font-semibold text-xs md:text-sm bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-900/50 transition flex items-center gap-1.5 border border-purple-200 dark:border-purple-900"
-                title="Open Phone Motion Sensor Pedometer"
+                onClick={() => (pedometerTracking ? stopPedometer() : startPedometer())}
+                className={`px-3.5 py-2.5 rounded-xl font-semibold text-xs md:text-sm transition flex items-center gap-1.5 border ${
+                  pedometerTracking
+                    ? 'bg-purple-600 text-white border-purple-500 shadow-lg shadow-purple-600/30 animate-pulse'
+                    : 'bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-900/50 border-purple-200 dark:border-purple-900'
+                }`}
+                title="Toggle automatic phone accelerometer motion pedometer"
               >
                 <Footprints className="w-4 h-4" />
-                <span>🚶 Auto Steps</span>
+                <span>{pedometerTracking ? '🚶 Tracking Live...' : '🚶 Auto Steps'}</span>
               </button>
 
               <button

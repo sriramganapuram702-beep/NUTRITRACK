@@ -65,6 +65,7 @@ export default function CalendarPage() {
         return;
       }
       setUser(authData.user);
+      clientStorage.setActiveUser(authData.user.id);
 
       const res = await fetch(`/api/calendar?month=${currentMonth}`);
       const data = await res.json();

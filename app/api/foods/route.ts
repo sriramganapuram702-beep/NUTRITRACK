@@ -2,6 +2,22 @@ import { NextResponse } from 'next/server';
 import { getDatabase } from '@/lib/db';
 import { FoodItem } from '@/lib/types';
 
+function normalizeFoodQuery(q: string): string[] {
+  const clean = q.toLowerCase().trim();
+  const variants = new Set<string>([clean]);
+
+  if (clean.includes('dall')) variants.add(clean.replace(/dall/g, 'dal'));
+  if (clean.includes('dal')) variants.add(clean.replace(/dal/g, 'dall'));
+  if (clean.endsWith('s') && clean.length > 3) variants.add(clean.slice(0, -1)); // eggs -> egg, rotis -> roti
+  if (clean.includes('egg')) variants.add('egg');
+  if (clean.includes('banana')) variants.add('banana');
+  if (clean.includes('rice')) variants.add('rice');
+  if (clean.includes('roti') || clean.includes('chapati')) variants.add('roti');
+  if (clean.includes('chicken')) variants.add('chicken');
+
+  return Array.from(variants);
+}
+
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -14,8 +30,10 @@ export async function GET(request: Request) {
     const params: (string | number)[] = [];
 
     if (query) {
-      sql += ' AND LOWER(name) LIKE LOWER(?)';
-      params.push(`%${query}%`);
+      const variants = normalizeFoodQuery(query);
+      const orClauses = variants.map(() => 'LOWER(name) LIKE LOWER(?)').join(' OR ');
+      sql += ` AND (${orClauses})`;
+      variants.forEach((v) => params.push(`%${v}%`));
     }
 
     if (category && category !== 'All') {

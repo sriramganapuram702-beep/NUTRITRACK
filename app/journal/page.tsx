@@ -43,7 +43,7 @@ function JournalContent() {
   const searchParams = useSearchParams();
 
   const [date, setDate] = useState(() => {
-    return searchParams.get('date') || new Date().toISOString().split('T')[0];
+    return searchParams.get('date') || clientStorage.getLocalTodayString();
   });
 
   const [user, setUser] = useState<User | null>(null);
@@ -106,6 +106,7 @@ function JournalContent() {
         return;
       }
       setUser(authData.user);
+      clientStorage.setActiveUser(authData.user.id);
 
       // 1. INSTANT PERSISTENCE: Load from phone storage first (0ms, survives serverless recycles)
       const localDay = clientStorage.getDayData(authData.user.id, date);
@@ -207,7 +208,7 @@ function JournalContent() {
   const shiftDate = (days: number) => {
     const current = new Date(date + 'T00:00:00');
     current.setDate(current.getDate() + days);
-    setDate(current.toISOString().split('T')[0]);
+    setDate(clientStorage.formatLocalDate(current));
   };
 
   const handleDeleteEntry = async (id: string) => {
@@ -316,7 +317,7 @@ function JournalContent() {
               </button>
 
               <button
-                onClick={() => setDate(new Date().toISOString().split('T')[0])}
+                onClick={() => setDate(clientStorage.getLocalTodayString())}
                 className="px-3 py-1.5 text-xs font-semibold text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 rounded-lg transition"
               >
                 Today

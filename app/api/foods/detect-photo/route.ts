@@ -47,11 +47,12 @@ export async function POST(request: Request) {
 
     const detectedFoods: DetectedItemCandidate[] = [];
 
-    // Helper to find food from database
+    // Helper to find food from database with alias handling
     const findFood = (keywords: string[]): FoodItem | undefined => {
       for (const kw of keywords) {
+        const cleanKw = kw.toLowerCase().replace(/dall/g, 'dal');
         for (const [name, food] of foodsMap.entries()) {
-          if (name.includes(kw.toLowerCase())) {
+          if (name.toLowerCase().includes(cleanKw) || (cleanKw.length > 3 && name.toLowerCase().includes(cleanKw.slice(0, -1)))) {
             return food;
           }
         }
@@ -135,8 +136,13 @@ Return ONLY a valid JSON array of objects with the schema:
     if (detectedFoods.length === 0) {
       const candidates: Array<{ keywords: string[]; amount: number; unit: FoodItem['serving_unit_default'] }> = [];
 
-      // Check for egg & banana specifically (common breakfast)
-      if (lower.includes('egg') || lower.includes('banana') || meal_type === 'Breakfast' || meal_type === 'Morning Snack') {
+      // Check for specific staple foods in filename / context
+      if (lower.includes('dall') || lower.includes('dal')) {
+        candidates.push(
+          { keywords: ['dal / dall', 'dal', 'toor'], amount: 1, unit: 'cups' },
+          { keywords: ['cooked white rice', 'white rice', 'rice'], amount: 1, unit: 'cups' }
+        );
+      } else if (lower.includes('egg') || lower.includes('banana') || meal_type === 'Breakfast' || meal_type === 'Morning Snack') {
         candidates.push(
           { keywords: ['whole egg', 'egg'], amount: 2, unit: 'pieces' }, // 2 eggs: 144 kcal, 12.6g protein
           { keywords: ['banana'], amount: 1, unit: 'pieces' } // 1 banana: 105 kcal, 27g carbs

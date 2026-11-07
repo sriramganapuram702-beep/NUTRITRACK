@@ -15,7 +15,7 @@ import { toast } from 'sonner';
 
 export default function WaterTrackerPage() {
   const router = useRouter();
-  const [date, setDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState(() => clientStorage.getLocalTodayString());
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [waterEntries, setWaterEntries] = useState<WaterEntry[]>([]);
@@ -33,6 +33,7 @@ export default function WaterTrackerPage() {
         return;
       }
       setUser(authData.user);
+      clientStorage.setActiveUser(authData.user.id);
 
       // 1. Load from local persistent storage (instant, never lost)
       const localDay = clientStorage.getDayData(authData.user.id, date);
@@ -148,7 +149,7 @@ export default function WaterTrackerPage() {
                 onClick={() => {
                   const d = new Date(date + 'T00:00:00');
                   d.setDate(d.getDate() - 1);
-                  setDate(d.toISOString().split('T')[0]);
+                  setDate(clientStorage.formatLocalDate(d));
                 }}
                 className="p-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400"
               >
@@ -168,7 +169,7 @@ export default function WaterTrackerPage() {
                 onClick={() => {
                   const d = new Date(date + 'T00:00:00');
                   d.setDate(d.getDate() + 1);
-                  setDate(d.toISOString().split('T')[0]);
+                  setDate(clientStorage.formatLocalDate(d));
                 }}
                 className="p-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400"
               >
@@ -177,7 +178,7 @@ export default function WaterTrackerPage() {
             </div>
 
             <button
-              onClick={() => setDate(new Date().toISOString().split('T')[0])}
+              onClick={() => setDate(clientStorage.getLocalTodayString())}
               className="px-3 py-1.5 text-xs font-semibold text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 rounded-lg transition"
             >
               Today

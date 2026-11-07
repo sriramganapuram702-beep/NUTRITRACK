@@ -38,7 +38,7 @@ const COMMON_PLATE_TAGS = [
   { name: 'Banana (Fresh Medium)', amount: 1, unit: 'pieces' as PortionUnit, calories: 105, protein: 1.3, carbs: 27.0, fat: 0.3, icon: '🍌', category: 'Fruits' },
   { name: 'Cooked White Rice', amount: 1, unit: 'cups' as PortionUnit, calories: 205, protein: 4.2, carbs: 44.5, fat: 0.5, icon: '🍚', category: 'Carbohydrates' },
   { name: 'South Indian Sambar', amount: 1, unit: 'cups' as PortionUnit, calories: 110, protein: 5.6, carbs: 17.0, fat: 2.0, icon: '🍲', category: 'Vegetables' },
-  { name: 'Dal (Yellow Moong/Toor)', amount: 1, unit: 'cups' as PortionUnit, calories: 198, protein: 12.0, carbs: 30.0, fat: 1.2, icon: '🍲', category: 'Protein' },
+  { name: 'Dal / Dall (Yellow Moong/Toor)', amount: 1, unit: 'cups' as PortionUnit, calories: 198, protein: 12.0, carbs: 30.0, fat: 1.2, icon: '🍲', category: 'Protein' },
   { name: 'Roti / Chapati (Whole Wheat)', amount: 2, unit: 'pieces' as PortionUnit, calories: 208, protein: 6.4, carbs: 36.0, fat: 2.8, icon: '🫓', category: 'Carbohydrates' },
   { name: 'Idli (Steamed)', amount: 3, unit: 'pieces' as PortionUnit, calories: 210, protein: 7.0, carbs: 42.0, fat: 1.2, icon: '⚪', category: 'Carbohydrates' },
   { name: 'Plain Dosa', amount: 1, unit: 'pieces' as PortionUnit, calories: 135, protein: 3.2, carbs: 23.2, fat: 3.0, icon: '🥞', category: 'Carbohydrates' },

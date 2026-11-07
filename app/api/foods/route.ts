@@ -14,7 +14,7 @@ export async function GET(request: Request) {
     const params: (string | number)[] = [];
 
     if (query) {
-      sql += ' AND name LIKE ?';
+      sql += ' AND LOWER(name) LIKE LOWER(?)';
       params.push(`%${query}%`);
     }
 

@@ -6,7 +6,7 @@
  * NEVER disappear across serverless cold starts, container restarts, or app closes.
  */
 
-import { FoodEntry, WaterEntry, MealType } from './types';
+import { FoodEntry, WaterEntry, MealType, Profile } from './types';
 
 const STORAGE_PREFIX = 'nutritrack_v1_';
 
@@ -197,5 +197,36 @@ export const clientStorage = {
 
     this.saveDayData(userId, merged);
     return merged;
+  },
+
+  // Key for permanent User Profile
+  getProfileKey(userId?: string): string {
+    return userId ? `${STORAGE_PREFIX}${userId}_user_profile` : `${STORAGE_PREFIX}user_profile`;
+  },
+
+  // Save user profile permanently to device storage
+  saveProfile(userId: string, profile: Profile): void {
+    if (typeof window === 'undefined') return;
+    try {
+      localStorage.setItem(this.getProfileKey(userId), JSON.stringify(profile));
+      localStorage.setItem('nutritrack_current_profile', JSON.stringify(profile));
+    } catch (e) {
+      console.warn('clientStorage.saveProfile error:', e);
+    }
+  },
+
+  // Load user profile from device storage
+  getProfile(userId?: string): Profile | null {
+    if (typeof window === 'undefined') return null;
+    try {
+      if (userId) {
+        const raw = localStorage.getItem(this.getProfileKey(userId));
+        if (raw) return JSON.parse(raw);
+      }
+      const fallback = localStorage.getItem('nutritrack_current_profile');
+      return fallback ? JSON.parse(fallback) : null;
+    } catch {
+      return null;
+    }
   },
 };

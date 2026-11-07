@@ -227,6 +227,7 @@ export async function verifyOtp(email: string, otp: string): Promise<{
   message: string;
   token?: string;
   isNewUser?: boolean;
+  profile?: Profile | null;
 }> {
   const normalizedEmail = email.toLowerCase().trim();
   const cleanOtp = otp.trim();
@@ -277,8 +278,8 @@ export async function verifyOtp(email: string, otp: string): Promise<{
     user = { id: userId, email: normalizedEmail, created_at: now, updated_at: now };
   } else {
     // Check if user has a profile
-    const profile = db.prepare('SELECT id FROM profiles WHERE user_id = ?').get(user.id);
-    isNewUser = !profile;
+    const existingProfile = db.prepare('SELECT * FROM profiles WHERE user_id = ?').get(user.id) as unknown as Profile | undefined;
+    isNewUser = !existingProfile;
   }
 
   // Create persistent session (180 days)
@@ -299,11 +300,14 @@ export async function verifyOtp(email: string, otp: string): Promise<{
     // Session insertion safe fallback
   }
 
+  const existingProfile = db.prepare('SELECT * FROM profiles WHERE user_id = ?').get(user.id) as unknown as Profile | undefined;
+
   return {
     success: true,
     message: 'Authentication successful',
     token,
     isNewUser,
+    profile: existingProfile || null,
   };
 }
 
@@ -335,7 +339,69 @@ export async function getCurrentUser(): Promise<{ user: User; profile: Profile |
     }
 
     if (user) {
-      const profile = (db.prepare('SELECT * FROM profiles WHERE user_id = ?').get(user.id) as unknown as Profile) || null;
+      let profile = (db.prepare('SELECT * FROM profiles WHERE user_id = ?').get(user.id) as unknown as Profile) || null;
+
+      // Re-hydrate from persistent profile cookie if SQLite was wiped by cold start or has older data
+      const profileCookie = cookieStore.get('nutritrack_profile')?.value;
+      if (profileCookie) {
+        try {
+          const cookieProfile: Profile = JSON.parse(Buffer.from(profileCookie, 'base64url').toString('utf8'));
+          if (cookieProfile && cookieProfile.user_id === user.id) {
+            if (!profile || new Date(cookieProfile.updated_at).getTime() >= new Date(profile.updated_at).getTime()) {
+              profile = cookieProfile;
+              try {
+                db.prepare(`
+                  INSERT INTO profiles (
+                    id, user_id, full_name, age, gender, height_cm, weight_kg,
+                    activity_level, fitness_goal, daily_step_goal,
+                    calorie_target, protein_target, carb_target, fat_target, fibre_target, water_target,
+                    updated_at
+                  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  ON CONFLICT(user_id) DO UPDATE SET
+                    full_name = excluded.full_name,
+                    age = excluded.age,
+                    gender = excluded.gender,
+                    height_cm = excluded.height_cm,
+                    weight_kg = excluded.weight_kg,
+                    activity_level = excluded.activity_level,
+                    fitness_goal = excluded.fitness_goal,
+                    daily_step_goal = excluded.daily_step_goal,
+                    calorie_target = excluded.calorie_target,
+                    protein_target = excluded.protein_target,
+                    carb_target = excluded.carb_target,
+                    fat_target = excluded.fat_target,
+                    fibre_target = excluded.fibre_target,
+                    water_target = excluded.water_target,
+                    updated_at = excluded.updated_at
+                `).run(
+                  cookieProfile.id,
+                  cookieProfile.user_id,
+                  cookieProfile.full_name,
+                  cookieProfile.age,
+                  cookieProfile.gender,
+                  cookieProfile.height_cm,
+                  cookieProfile.weight_kg,
+                  cookieProfile.activity_level,
+                  cookieProfile.fitness_goal,
+                  cookieProfile.daily_step_goal,
+                  cookieProfile.calorie_target,
+                  cookieProfile.protein_target,
+                  cookieProfile.carb_target,
+                  cookieProfile.fat_target,
+                  cookieProfile.fibre_target,
+                  cookieProfile.water_target,
+                  cookieProfile.updated_at
+                );
+              } catch {
+                // SQLite sync fallback
+              }
+            }
+          }
+        } catch {
+          // invalid cookie format
+        }
+      }
+
       return { user, profile };
     }
   }
@@ -350,7 +416,18 @@ export async function getCurrentUser(): Promise<{ user: User; profile: Profile |
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(session.user_id) as unknown as User | undefined;
   if (!user) return null;
 
-  const profile = (db.prepare('SELECT * FROM profiles WHERE user_id = ?').get(user.id) as unknown as Profile) || null;
+  let profile = (db.prepare('SELECT * FROM profiles WHERE user_id = ?').get(user.id) as unknown as Profile) || null;
+  const profileCookie = cookieStore.get('nutritrack_profile')?.value;
+  if (profileCookie) {
+    try {
+      const cookieProfile: Profile = JSON.parse(Buffer.from(profileCookie, 'base64url').toString('utf8'));
+      if (cookieProfile && cookieProfile.user_id === user.id) {
+        profile = cookieProfile;
+      }
+    } catch {
+      // ignore
+    }
+  }
 
   return { user, profile };
 }
@@ -367,6 +444,7 @@ export async function clearSession(): Promise<void> {
     }
     cookieStore.delete(COOKIE_NAME);
   }
+  cookieStore.delete('nutritrack_profile');
 }
 
 export { COOKIE_NAME };

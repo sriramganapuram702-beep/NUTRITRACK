@@ -45,6 +45,7 @@ export interface Profile {
   fat_target: number;
   fibre_target: number;
   water_target: number;
+  created_at?: string;
   updated_at: string;
 }
 

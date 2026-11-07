@@ -25,6 +25,7 @@ export async function POST(request: Request) {
       success: true,
       message: 'Logged in successfully',
       isNewUser: result.isNewUser,
+      profile: result.profile || null,
     });
 
     // Set HTTP-only secure cookie for 180 days persistent login
@@ -37,6 +38,20 @@ export async function POST(request: Request) {
       path: '/',
       maxAge: 180 * 24 * 60 * 60, // 180 days
     });
+
+    // Also persist profile in cookie if user already has an existing profile
+    if (result.profile) {
+      const profileVal = Buffer.from(JSON.stringify(result.profile)).toString('base64url');
+      response.cookies.set({
+        name: 'nutritrack_profile',
+        value: profileVal,
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        path: '/',
+        maxAge: 180 * 24 * 60 * 60,
+      });
+    }
 
     return response;
   } catch (error) {

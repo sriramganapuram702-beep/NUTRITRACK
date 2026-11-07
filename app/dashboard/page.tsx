@@ -114,7 +114,35 @@ export default function DashboardPage() {
         return;
       }
       setUser(meData.user);
-      setProfile(meData.profile);
+      
+      // Load user profile from persistent storage (handles cold restart / profile update)
+      const localProfile = clientStorage.getProfile(meData.user.id) || clientStorage.getProfile();
+      let activeProfile: Profile = meData.profile;
+      if (localProfile) {
+        const localTime = new Date(localProfile.updated_at || localProfile.created_at || 0).getTime();
+        const serverTime = new Date(meData.profile.updated_at || meData.profile.created_at || 0).getTime();
+        if (localTime >= serverTime) {
+          activeProfile = localProfile;
+        } else {
+          clientStorage.saveProfile(meData.user.id, meData.profile);
+        }
+      } else {
+        clientStorage.saveProfile(meData.user.id, meData.profile);
+      }
+      setProfile(activeProfile);
+
+      if (activeProfile) {
+        setTargets((prev) => ({
+          ...prev,
+          calorieTarget: activeProfile.calorie_target,
+          proteinTarget: activeProfile.protein_target,
+          carbTarget: activeProfile.carb_target,
+          fatTarget: activeProfile.fat_target,
+          fibreTarget: activeProfile.fibre_target,
+          waterTarget: activeProfile.water_target,
+          stepTarget: activeProfile.daily_step_goal,
+        }));
+      }
 
       // 1. INSTANT PERSISTENCE: Read from phone storage first (never lost across cold starts)
       const localDay = clientStorage.getDayData(meData.user.id, selectedDate);
@@ -158,7 +186,16 @@ export default function DashboardPage() {
 
         setFoodEntries(merged.foodEntries);
         setWaterEntries(merged.waterEntries);
-        setTargets(journalData.targets || targets);
+        const effTargets = activeProfile ? {
+          calorieTarget: activeProfile.calorie_target,
+          proteinTarget: activeProfile.protein_target,
+          carbTarget: activeProfile.carb_target,
+          fatTarget: activeProfile.fat_target,
+          fibreTarget: activeProfile.fibre_target,
+          waterTarget: activeProfile.water_target,
+          stepTarget: activeProfile.daily_step_goal,
+        } : (journalData.targets || targets);
+        setTargets(effTargets);
         setBreakdown(journalData.breakdown || breakdown);
         setRemarks(journalData.remarks || remarks);
         setIsSubmitted(Boolean(journalData.log?.is_submitted || merged.isSubmitted));

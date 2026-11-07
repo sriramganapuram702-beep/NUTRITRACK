@@ -164,11 +164,25 @@ export async function POST(request: Request) {
 
     const updatedProfile = db.prepare('SELECT * FROM profiles WHERE user_id = ?').get(auth.user.id) as unknown as Profile;
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       message: 'Profile saved successfully.',
       profile: updatedProfile,
     });
+
+    // Set 180-day persistent cookie so all Vercel serverless containers immediately have the updated profile
+    const profileCookieVal = Buffer.from(JSON.stringify(updatedProfile)).toString('base64url');
+    response.cookies.set({
+      name: 'nutritrack_profile',
+      value: profileCookieVal,
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 180 * 24 * 60 * 60, // 180 days
+    });
+
+    return response;
   } catch (error) {
     console.error('Error saving profile:', error);
     return NextResponse.json({ error: 'Failed to save profile' }, { status: 500 });

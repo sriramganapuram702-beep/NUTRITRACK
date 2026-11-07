@@ -2,11 +2,39 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Flame, Sparkles, ArrowRight, UserCheck, ShieldCheck, Check } from 'lucide-react';
+import { Flame, Sparkles, ArrowRight, UserCheck, ShieldCheck, Check, Scale, Dumbbell } from 'lucide-react';
 import { ActivityLevel, FitnessGoal, Gender } from '@/lib/types';
 import { calculatePersonalizedTargets } from '@/lib/nutrition';
 import { DisclaimerBanner } from '@/components/ui/DisclaimerBanner';
+import { clientStorage } from '@/lib/client-storage';
 import { toast } from 'sonner';
+
+const FITNESS_GOALS: { id: FitnessGoal; title: string; desc: string; icon: React.ComponentType<{ className?: string }> }[] = [
+  {
+    id: 'Maintain Weight',
+    title: 'Maintain Weight',
+    desc: 'Keep current weight & energy',
+    icon: Scale,
+  },
+  {
+    id: 'Gain Weight / Muscle',
+    title: 'Gain Weight / Muscle',
+    desc: 'Build lean mass & surplus',
+    icon: Dumbbell,
+  },
+  {
+    id: 'Lose Weight',
+    title: 'Lose Weight',
+    desc: 'Burn fat & get lean deficit',
+    icon: Flame,
+  },
+];
+
+const GENDERS: { id: Gender; label: string; icon: string }[] = [
+  { id: 'Male', label: 'Male', icon: '👨' },
+  { id: 'Female', label: 'Female', icon: '👩' },
+  { id: 'Other', label: 'Other', icon: '👤' },
+];
 
 export default function OnboardingPage() {
   const router = useRouter();
@@ -30,7 +58,8 @@ export default function OnboardingPage() {
         if (!data.authenticated) {
           router.push('/');
         } else if (data.profile) {
-          // Profile already exists, redirect to dashboard
+          // Profile already exists, save to storage and redirect
+          clientStorage.saveProfile(data.profile.user_id, data.profile);
           router.push('/dashboard');
         }
       })
@@ -77,6 +106,11 @@ export default function OnboardingPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to save profile');
 
+      if (data.profile) {
+        // Save permanently to client-side storage so it NEVER disappears across sessions
+        clientStorage.saveProfile(data.profile.user_id, data.profile);
+      }
+
       toast.success('Profile created! Welcome to NutriTrack.');
       router.push('/dashboard');
     } catch (err: unknown) {
@@ -88,19 +122,19 @@ export default function OnboardingPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 py-8 px-4 md:px-8">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 py-8 px-4 md:px-8 text-slate-900 dark:text-slate-100">
       <div className="max-w-4xl mx-auto space-y-8">
         {/* Header */}
         <div className="text-center space-y-2">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 text-xs font-bold mb-2">
+          <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 text-xs font-bold mb-2">
             <Sparkles className="w-3.5 h-3.5" />
-            Step 1 of 1 • Profile Setup
+            Step 1 of 1 • Profile & Goal Setup
           </div>
           <h1 className="text-3xl md:text-4xl font-black text-slate-900 dark:text-white tracking-tight">
             Welcome to NutriTrack
           </h1>
           <p className="text-sm text-slate-500 dark:text-slate-400 max-w-lg mx-auto">
-            Tell us about your physical profile and fitness goals to generate your personalized estimated daily nutrition targets.
+            Choose your fitness goals and body attributes to calculate your scientific, personalized daily nutrition targets.
           </p>
         </div>
 
@@ -123,12 +157,12 @@ export default function OnboardingPage() {
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
                 placeholder="e.g. Alex Johnson"
-                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
+                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white text-sm font-semibold focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-hidden transition"
               />
             </div>
 
-            {/* Age & Gender */}
-            <div className="grid grid-cols-2 gap-4">
+            {/* Age & Gender Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
                   Age (years)
@@ -140,7 +174,7 @@ export default function OnboardingPage() {
                   required
                   value={age}
                   onChange={(e) => setAge(parseInt(e.target.value) || 0)}
-                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
+                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white text-sm font-semibold focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-hidden transition"
                 />
               </div>
 
@@ -148,15 +182,26 @@ export default function OnboardingPage() {
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
                   Gender
                 </label>
-                <select
-                  value={gender}
-                  onChange={(e) => setGender(e.target.value as Gender)}
-                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
-                >
-                  <option value="Male">Male</option>
-                  <option value="Female">Female</option>
-                  <option value="Other">Other</option>
-                </select>
+                <div className="grid grid-cols-3 gap-2">
+                  {GENDERS.map((g) => {
+                    const isSelected = gender === g.id;
+                    return (
+                      <button
+                        key={g.id}
+                        type="button"
+                        onClick={() => setGender(g.id)}
+                        className={`p-2.5 rounded-xl border text-center font-bold text-xs cursor-pointer select-none transition-all duration-200 flex items-center justify-center gap-1.5 ${
+                          isSelected
+                            ? 'gradient-touch-active'
+                            : 'gradient-touch-option border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-950/40 text-slate-700 dark:text-slate-300 hover:border-teal-500/40'
+                        }`}
+                      >
+                        <span>{g.icon}</span>
+                        <span>{g.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
 
@@ -173,7 +218,7 @@ export default function OnboardingPage() {
                   required
                   value={heightCm}
                   onChange={(e) => setHeightCm(parseFloat(e.target.value) || 0)}
-                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
+                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white text-sm font-semibold focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-hidden transition"
                 />
               </div>
 
@@ -189,62 +234,76 @@ export default function OnboardingPage() {
                   required
                   value={weightKg}
                   onChange={(e) => setWeightKg(parseFloat(e.target.value) || 0)}
-                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
+                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white text-sm font-semibold focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-hidden transition"
                 />
               </div>
             </div>
 
-            {/* Activity Level */}
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">
-                Activity Level
-              </label>
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                {(['Sedentary', 'Lightly Active', 'Moderately Active', 'Very Active'] as ActivityLevel[]).map(
-                  (lvl) => (
-                    <button
-                      key={lvl}
-                      type="button"
-                      onClick={() => setActivityLevel(lvl)}
-                      className={`p-3 rounded-2xl border text-left font-medium transition ${
-                        activityLevel === lvl
-                          ? 'border-emerald-600 bg-emerald-50/60 dark:bg-emerald-950/40 text-emerald-900 dark:text-emerald-200 ring-2 ring-emerald-500/20'
-                          : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/40 text-slate-700 dark:text-slate-300'
-                      }`}
-                    >
-                      <div className="font-bold">{lvl}</div>
-                      <div className="text-[10px] text-slate-400 mt-0.5">
-                        {lvl === 'Sedentary' && 'Desk job, little movement'}
-                        {lvl === 'Lightly Active' && '1-3 days exercise/week'}
-                        {lvl === 'Moderately Active' && '3-5 days exercise/week'}
-                        {lvl === 'Very Active' && '6-7 days heavy training'}
-                      </div>
-                    </button>
-                  )
-                )}
-              </div>
-            </div>
-
-            {/* Fitness Goal */}
+            {/* Fitness Goal Cards */}
             <div>
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">
                 Fitness Goal
               </label>
-              <div className="grid grid-cols-3 gap-2 text-xs">
-                {(['Maintain Weight', 'Gain Weight / Muscle', 'Lose Weight'] as FitnessGoal[]).map((g) => (
-                  <button
-                    key={g}
-                    type="button"
-                    onClick={() => setFitnessGoal(g)}
-                    className={`p-3 rounded-2xl border text-center font-bold transition ${
-                      fitnessGoal === g
-                        ? 'border-emerald-600 bg-emerald-50/60 dark:bg-emerald-950/40 text-emerald-900 dark:text-emerald-200 ring-2 ring-emerald-500/20'
-                        : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/40 text-slate-700 dark:text-slate-300'
-                    }`}
-                  >
-                    {g}
-                  </button>
-                ))}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+                {FITNESS_GOALS.map((goal) => {
+                  const Icon = goal.icon;
+                  const isSelected = fitnessGoal === goal.id;
+                  return (
+                    <button
+                      key={goal.id}
+                      type="button"
+                      onClick={() => setFitnessGoal(goal.id)}
+                      className={`p-3.5 rounded-2xl border text-left font-bold cursor-pointer select-none transition-all duration-200 ${
+                        isSelected
+                          ? 'gradient-touch-active'
+                          : 'gradient-touch-option border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-950/40 text-slate-700 dark:text-slate-300 hover:border-teal-500/40'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-1.5">
+                        <Icon className={`w-4 h-4 ${isSelected ? 'text-white' : 'text-teal-600 dark:text-teal-400'}`} />
+                        {isSelected && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                      </div>
+                      <div className="font-bold text-xs">{goal.title}</div>
+                      <div className={`text-[10px] mt-0.5 leading-snug ${isSelected ? 'text-white/80' : 'text-slate-400'}`}>
+                        {goal.desc}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Activity Level Cards */}
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">
+                Activity Level
+              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+                {(['Sedentary', 'Lightly Active', 'Moderately Active', 'Very Active'] as ActivityLevel[]).map(
+                  (lvl) => {
+                    const isSelected = activityLevel === lvl;
+                    return (
+                      <button
+                        key={lvl}
+                        type="button"
+                        onClick={() => setActivityLevel(lvl)}
+                        className={`p-3 rounded-2xl border text-left font-medium cursor-pointer select-none transition-all duration-200 ${
+                          isSelected
+                            ? 'gradient-touch-active'
+                            : 'gradient-touch-option border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-950/40 text-slate-700 dark:text-slate-300 hover:border-teal-500/40'
+                        }`}
+                      >
+                        <div className="font-bold text-xs">{lvl}</div>
+                        <div className={`text-[10px] mt-0.5 ${isSelected ? 'text-white/80' : 'text-slate-400'}`}>
+                          {lvl === 'Sedentary' && 'Desk job, little movement'}
+                          {lvl === 'Lightly Active' && '1-3 days exercise/week'}
+                          {lvl === 'Moderately Active' && '3-5 days exercise/week'}
+                          {lvl === 'Very Active' && '6-7 days heavy training'}
+                        </div>
+                      </button>
+                    );
+                  }
+                )}
               </div>
             </div>
 
@@ -260,16 +319,16 @@ export default function OnboardingPage() {
                 max="50000"
                 value={dailyStepGoal}
                 onChange={(e) => setDailyStepGoal(parseInt(e.target.value) || 10000)}
-                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
+                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white text-sm font-semibold focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-hidden transition"
               />
             </div>
           </div>
 
           {/* Right Column: Live Target Calculations Preview */}
           <div className="lg:col-span-5 space-y-5">
-            <div className="bg-gradient-to-br from-emerald-500/10 via-teal-500/5 to-slate-900/5 dark:from-emerald-950/40 dark:via-slate-900 dark:to-slate-900 p-6 md:p-8 rounded-3xl border border-emerald-500/20 dark:border-slate-800 space-y-6">
+            <div className="bg-gradient-to-br from-teal-500/10 via-emerald-500/5 to-slate-900/5 dark:from-teal-950/40 dark:via-slate-900 dark:to-slate-900 p-6 md:p-8 rounded-3xl border border-teal-500/20 dark:border-slate-800 space-y-6">
               <div>
-                <span className="text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                <span className="text-xs font-bold uppercase tracking-wider text-teal-600 dark:text-teal-400">
                   Calculated For You
                 </span>
                 <h3 className="text-xl font-bold text-slate-900 dark:text-white mt-0.5">
@@ -319,14 +378,14 @@ export default function OnboardingPage() {
 
                 <div className="p-3 rounded-2xl bg-white dark:bg-slate-950 border border-slate-200/80 dark:border-slate-800 flex items-center justify-between">
                   <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">Hydration (Water)</span>
-                  <span className="font-bold text-sm text-blue-600 dark:text-blue-400">
+                  <span className="font-bold text-sm text-teal-600 dark:text-teal-400">
                     {calculatedTargets.waterTarget} ml / day
                   </span>
                 </div>
 
                 <div className="p-3 rounded-2xl bg-white dark:bg-slate-950 border border-slate-200/80 dark:border-slate-800 flex items-center justify-between">
                   <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">Daily Steps</span>
-                  <span className="font-bold text-sm text-purple-600 dark:text-purple-400">
+                  <span className="font-bold text-sm text-cyan-600 dark:text-cyan-400">
                     {calculatedTargets.stepTarget.toLocaleString()} steps
                   </span>
                 </div>
@@ -336,7 +395,7 @@ export default function OnboardingPage() {
               <button
                 type="submit"
                 disabled={submitting}
-                className="w-full py-3.5 px-4 rounded-2xl font-bold text-sm bg-emerald-600 hover:bg-emerald-700 text-white shadow-lg shadow-emerald-600/25 active:scale-[0.99] disabled:opacity-50 transition flex items-center justify-center gap-2"
+                className="w-full py-4 px-4 rounded-2xl font-bold text-sm btn-gradient-premium disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
               >
                 {submitting ? (
                   <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
